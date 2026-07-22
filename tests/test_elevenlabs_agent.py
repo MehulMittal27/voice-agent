@@ -27,10 +27,12 @@ class ElevenLabsAgentScriptTests(unittest.TestCase):
         self.assertEqual(agent["language"], "de")
         self.assertEqual(agent["first_message"], "")
         self.assertEqual(agent["prompt"]["llm"], "custom-llm")
+        custom_llm = agent["prompt"]["custom_llm"]
         self.assertEqual(
-            agent["prompt"]["custom_llm"]["url"],
+            custom_llm["url"],
             "https://demo.ngrok-free.app/v1/chat/completions",
         )
+        self.assertNotIn("api_key", custom_llm)
         self.assertIn(
             "perception_session_id",
             agent["dynamic_variables"]["dynamic_variable_placeholders"],
