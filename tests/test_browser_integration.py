@@ -21,19 +21,25 @@ class BrowserIntegrationTests(unittest.TestCase):
     def tearDown(self) -> None:
         session_store.clear()
 
-    def test_static_index_sends_perception_id_as_custom_llm_extra_body(self) -> None:
+    def test_static_index_sends_only_dynamic_variables_to_elevenlabs(self) -> None:
         html = STATIC_INDEX.read_text(encoding="utf-8")
 
-        self.assertIn("const customLlmExtraBody = { perception_session_id: perceptionSessionId };", html)
-        self.assertIn("customLlmExtraBody,", html)
-        self.assertNotIn("custom_llm_extra_body", html)
-
-    def test_static_index_sends_perception_id_as_dynamic_variable(self) -> None:
-        html = STATIC_INDEX.read_text(encoding="utf-8")
-
+        forbidden_browser_options = (
+            "custom" + "LlmExtraBody",
+            "custom_llm" + "_extra_body",
+        )
+        for forbidden in forbidden_browser_options:
+            self.assertNotIn(forbidden, html)
         self.assertIn("const dynamicVariables = { perception_session_id: perceptionSessionId };", html)
         self.assertIn("dynamicVariables,", html)
         self.assertNotIn("conversation_initiation_client_data", html)
+
+    def test_static_index_shows_perception_correlation_status(self) -> None:
+        html = STATIC_INDEX.read_text(encoding="utf-8")
+
+        self.assertIn('id="correlation-status"', html)
+        self.assertIn("Perception correlation: direct dynamic variable", html)
+        self.assertIn("server fallback active", html)
 
     def test_webhook_extracts_elevenlabs_extra_body(self) -> None:
         session_id, source = extract_perception_session_id(
@@ -87,6 +93,11 @@ class BrowserIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["perception_state_url"], "/perception/state/perception_123")
         self.assertEqual(payload["perception_audio_ws_url"], "/perception/audio/perception_123")
         self.assertEqual(payload["perception_language"], "uk")
+        self.assertEqual(
+            payload["perception_correlation_mode"],
+            "dynamic_variable_with_server_fallback",
+        )
+        self.assertIs(payload["perception_fallback_enabled"], True)
 
     def test_perception_state_proxy_returns_state_envelope(self) -> None:
         app = create_app(Settings(voice_perception_url="http://127.0.0.1:8000"))

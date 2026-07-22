@@ -43,8 +43,6 @@ _EXTRA_BODY_KEYS = (
     "elevenlabs_extra_body",
     "extra_body",
     "extraBody",
-    "custom_llm_extra_body",
-    "customLlmExtraBody",
 )
 _SECRET_KEY_PARTS = (
     "api_key",

@@ -486,6 +486,7 @@
               </div>
               <div id="session-status" class="status-meta">Press Start to open the microphone and connect to ElevenLabs.</div>
               <div id="perception-status" class="status-meta">Perception idle.</div>
+              <div id="correlation-status" class="status-meta">Perception correlation: not started.</div>
             </div>
           </div>
 
@@ -558,6 +559,7 @@
           connectionStatus: document.getElementById("connection-status"),
           sessionStatus: document.getElementById("session-status"),
           perceptionStatus: document.getElementById("perception-status"),
+          correlationStatus: document.getElementById("correlation-status"),
           sessionId: document.getElementById("session-id"),
           transcript: document.getElementById("transcript"),
           emptyTranscript: document.getElementById("empty-transcript"),
@@ -620,10 +622,15 @@
           els.liveBadge.dataset.state = state;
         }
 
+        function setCorrelationStatus(message) {
+          els.correlationStatus.textContent = message;
+        }
+
         async function startDemo() {
           setPhase("starting", "Starting...");
           setSessionStatus("Creating a voice-agent session...");
           setPerceptionStatus("Waiting for perception session.");
+          setCorrelationStatus("Perception correlation: starting.");
 
           try {
             clearTranscript();
@@ -644,6 +651,7 @@
             }
 
             els.sessionId.textContent = shortenId(perceptionSessionId);
+            setCorrelationStatus(describePerceptionCorrelation(session, perceptionSessionId));
             setSessionStatus("Microphone permission requested.");
 
             const targets = resolvePerceptionTargets(session, perceptionSessionId);
@@ -678,12 +686,10 @@
 
             const Conversation = await loadElevenLabsConversation();
             const dynamicVariables = { perception_session_id: perceptionSessionId };
-            const customLlmExtraBody = { perception_session_id: perceptionSessionId };
             app.conversation = await Conversation.startSession({
               agentId,
               connectionType: "websocket",
               dynamicVariables,
-              customLlmExtraBody,
               onConnect: (event) => {
                 const conversationId = event && event.conversationId ? event.conversationId : "connected";
                 setPhase("connected", "Connected");
@@ -792,6 +798,7 @@
           app.perceptionTargets = null;
           app.perceptionReachable = true;
           app.stopping = false;
+          setCorrelationStatus("Perception correlation: not started.");
 
           if (!options.quiet) {
             setPhase("idle", "Idle");
@@ -820,6 +827,19 @@
           }
 
           return payload;
+        }
+
+        function describePerceptionCorrelation(session, sessionId) {
+          if (!sessionId) {
+            return "Perception correlation: not started.";
+          }
+
+          const mode = readString(session, ["perception_correlation_mode", "perceptionCorrelationMode"]);
+          const fallbackEnabled = readBoolean(session, ["perception_fallback_enabled", "perceptionFallbackEnabled"]);
+          if (fallbackEnabled || mode === "dynamic_variable_with_server_fallback") {
+            return "Perception correlation: direct dynamic variable; server fallback active.";
+          }
+          return "Perception correlation: direct dynamic variable.";
         }
 
         function resolvePerceptionTargets(session, sessionId) {
@@ -1230,6 +1250,20 @@
             if (typeof value === "string" && value.trim()) return value.trim();
           }
           return "";
+        }
+
+        function readBoolean(object, keys) {
+          if (!object || typeof object !== "object") return false;
+          for (const key of keys) {
+            const value = object[key];
+            if (typeof value === "boolean") return value;
+            if (typeof value === "string" && value.trim()) {
+              const normalized = value.trim().toLowerCase();
+              if (normalized === "true") return true;
+              if (normalized === "false") return false;
+            }
+          }
+          return false;
         }
 
         function isMissingAgentId(value) {
