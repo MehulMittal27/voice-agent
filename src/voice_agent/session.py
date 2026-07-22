@@ -290,12 +290,37 @@ class SessionStore:
 
 
 _ENGLISH_REQUEST_PHRASES = (
+    # Bare tokens (catch most phrasings) - kept intentionally.
     "english",
     "englisch",
+    # English phrasings.
     "in english",
-    "auf englisch",
     "speak english",
     "switch to english",
+    "can we speak english",
+    "can you speak english",
+    "could you speak english",
+    "let's speak english",
+    "speak in english",
+    "talk in english",
+    "continue in english",
+    "english please",
+    "in english please",
+    "let us continue in english",
+    # German phrasings.
+    "auf englisch",
+    "sprechen sie englisch",
+    "sprechen sie english",
+    "koennen wir englisch",
+    "können wir englisch",
+    "auf englisch bitte",
+    "englisch bitte",
+    "reden wir englisch",
+    "lass uns englisch",
+    "wechseln wir zu englisch",
+    "auf englisch wechseln",
+    "auf englisch umschalten",
+    "auf englisch weitermachen",
 )
 _ENGLISH_ACCEPT_WORDS = (
     "yes",
