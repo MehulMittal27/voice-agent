@@ -9,6 +9,7 @@ Run commands from the repo root.
 ### 0. Prerequisites
 
 - Python 3.11
+- `uv`
 - An OpenAI API key and an ElevenLabs API key
 - `ngrok` or another HTTPS tunnel for ElevenLabs to reach your local webhook
 - The companion `voice-perception` service cloned and running separately: <https://github.com/mehulmittal27/voice-perception>
@@ -34,28 +35,25 @@ OPENAI_MODEL=gpt-4o-mini
 
 Leave `ELEVENLABS_AGENT_ID` blank until the agent is created. Keep all keys server-side only.
 
-### 2. Create and activate a virtualenv
+### 2. Install with uv
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+uv sync
 ```
 
-### 3. Install dependencies
+`uv sync` creates `.venv`, installs the runtime dependencies, and installs the
+`src/` package so `voice_agent` is importable from the repo root. No
+`PYTHONPATH` export is needed.
+
+### 3. Start voice-agent
 
 ```bash
-pip install -r requirements.txt
-```
-
-### 4. Start voice-agent
-
-```bash
-export PYTHONPATH=src
-uvicorn voice_agent.main:app --port 8001 --reload
+uv run uvicorn voice_agent.main:app --port 8001 --reload
 ```
 
 Keep this terminal running. Health check: <http://localhost:8001/health>.
 
-### 5. Expose the local webhook
+### 4. Expose the local webhook
 
 In a second terminal:
 
@@ -65,7 +63,7 @@ ngrok http 8001
 
 Copy the HTTPS URL, for example `https://abc123.ngrok-free.app`.
 
-### 6. Create or update the ElevenLabs agent
+### 5. Create or update the ElevenLabs agent
 
 First time:
 
@@ -81,7 +79,7 @@ python3 scripts/elevenlabs_agent.py update-url https://abc123.ngrok-free.app
 
 The script configures the Conversational AI agent with German output, `eleven_flash_v2_5` TTS, the Custom LLM URL `<ngrok-url>/v1/chat/completions`, and the `perception_session_id` dynamic variable. It reads `ELEVENLABS_API_KEY` from `.env` or the environment and never prints the key.
 
-### 7. Save the agent ID and restart
+### 6. Save the agent ID and restart
 
 After `create`, copy the printed line into `.env`:
 
@@ -91,7 +89,7 @@ ELEVENLABS_AGENT_ID=agent_...
 
 Restart `uvicorn` so the browser session endpoint returns the agent ID.
 
-### 8. Run the browser demo
+### 7. Run the browser demo
 
 Open <http://localhost:8001>, click **Start**, grant microphone access, and speak English. Frau Weber should respond in German while adapting to the live perception state.
 
@@ -107,15 +105,17 @@ Then continue using the same browser demo.
 
 ## Local validation
 
-With the virtualenv active and `PYTHONPATH=src` set:
+From the repo root:
 
 ```bash
-python3 -m unittest discover -s tests -v
-python scripts/test_perception_client.py
-python scripts/test_webhook.py
+uv run python -m unittest discover -s tests -v
+uv run python -m compileall src scripts tests
+uv run python scripts/test_perception_client.py
+uv run python scripts/test_webhook.py
 ```
 
-`test_webhook.py` exercises the OpenAI webhook path and requires `OPENAI_API_KEY`.
+`test_perception_client.py` requires the companion service. `test_webhook.py`
+exercises the OpenAI webhook path and requires `OPENAI_API_KEY`.
 
 ## Optional ElevenLabs MCP tooling
 
