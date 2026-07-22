@@ -66,10 +66,36 @@ _SYSTEM_MESSAGE_SESSION_ID_RE = re.compile(
     re.IGNORECASE,
 )
 
+# id_source strings returned by _resolve_perception_session_id when the session
+# was guessed from local state rather than carried by the request.
+_DEMO_FALLBACK_ID_SOURCES = frozenset(
+    {
+        "single active local session fallback",
+        "latest active demo session fallback",
+    }
+)
+
+
+def _correlation_mode(id_source: str) -> str:
+    """Map an id_source string to a human-readable LLM-turn correlation mode.
+
+    Direct dynamic-variable / explicit placements (top-level, extra-body,
+    dynamic-variable containers, the system-message marker, and user-message
+    metadata) all mean the request itself carried the id. The demo fallbacks
+    mean we guessed from local session state. Unknown sources are named
+    verbatim rather than silently mislabelled.
+    """
+    if id_source in _DEMO_FALLBACK_ID_SOURCES:
+        return "latest active demo fallback"
+    if id_source == "missing":
+        return "none resolved"
+    return "direct dynamic variable"
+
 
 @router.post("/v1/chat/completions")
 async def chat_completions(request: Request) -> StreamingResponse:
     """Handle ElevenLabs Custom LLM calls and stream OpenAI-format SSE."""
+    logger.info("LLM turn started: POST /v1/chat/completions")
     body = await _read_json_body(request)
     messages = _extract_messages(body)
     perception_session_id, id_source = _resolve_perception_session_id(body)
@@ -90,12 +116,44 @@ async def chat_completions(request: Request) -> StreamingResponse:
         redact_secrets(perception_state),
     )
 
+    _log_injected_perception(perception_session_id, id_source, perception_state)
+
     text_stream = clerk.run_turn(messages, perception_state)
     sse_stream = openai_to_openai_sse(_ensure_async_text_stream(text_stream))
     return StreamingResponse(
         sse_stream,
         media_type="text/event-stream",
         headers=SSE_HEADERS,
+    )
+
+
+def _log_injected_perception(
+    perception_session_id: str | None,
+    id_source: str,
+    perception_state: Mapping[str, Any],
+) -> None:
+    """Log exactly what perception state is injected into this LLM turn."""
+    if perception_session_id:
+        logger.info(
+            "LLM turn perception correlation: %s, session=%s",
+            _correlation_mode(id_source),
+            perception_session_id,
+        )
+    else:
+        logger.warning(
+            "LLM turn injected neutral fallback because no perception session "
+            "was resolved (id_source=%s)",
+            id_source,
+        )
+
+    logger.info(
+        "LLM turn injected perception state: emotion=%s, confidence=%s, "
+        "stability=%s, hesitation=%s, events=%s",
+        perception_state.get("emotion"),
+        perception_state.get("emotion_confidence"),
+        perception_state.get("stability"),
+        perception_state.get("hesitation_score"),
+        perception_state.get("audio_events"),
     )
 
 
