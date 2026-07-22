@@ -14,6 +14,7 @@ from voice_agent.config import get_settings
 logger = logging.getLogger(__name__)
 
 STATE_TIMEOUT_SECONDS = 0.1
+HEALTH_TIMEOUT_SECONDS = 0.5
 REQUEST_TIMEOUT_SECONDS = 5.0
 
 DEFAULT_NEUTRAL_STATE: dict[str, Any] = {
@@ -127,6 +128,20 @@ class PerceptionClient:
 
         return _merge_with_neutral_state(payload)
 
+    async def is_reachable(self) -> bool:
+        """Return whether the voice-perception health endpoint is reachable."""
+        try:
+            async with httpx.AsyncClient(timeout=HEALTH_TIMEOUT_SECONDS) as client:
+                response = await client.get(self._url("/health"))
+                response.raise_for_status()
+        except httpx.HTTPError as exc:
+            logger.debug("Perception health check failed: %s", exc)
+            return False
+        except Exception as exc:
+            logger.debug("Unexpected perception health check error: %s", exc)
+            return False
+        return True
+
     async def end_session(self, session_id: str) -> None:
         """End a voice-perception session, logging and swallowing failures."""
         if not session_id.strip():
@@ -197,6 +212,11 @@ async def get_state(session_id: str) -> dict[str, Any]:
     return await PerceptionClient().get_state(session_id)
 
 
+async def is_reachable() -> bool:
+    """Check voice-perception reachability using configured settings."""
+    return await PerceptionClient().is_reachable()
+
+
 async def end_session(session_id: str) -> None:
     """End a voice-perception session using configured settings."""
     await PerceptionClient().end_session(session_id)
@@ -207,6 +227,7 @@ __all__ = [
     "PerceptionClient",
     "PerceptionClientError",
     "end_session",
+    "is_reachable",
     "get_state",
     "neutral_state",
     "start_session",
