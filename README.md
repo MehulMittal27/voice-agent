@@ -2,11 +2,19 @@
 
 Voice Agent service for a live German recognition-office clerk demo using ElevenLabs Conversational AI, OpenAI, and the companion voice-perception service.
 
-## ElevenLabs agent setup without MCP
+## Local setup
 
-Use `scripts/elevenlabs_agent.py` to create or update the ElevenLabs Conversational AI agent directly through the ElevenLabs REST API. This does not require Claude Desktop or any MCP client.
+Wave 0 provides the project scaffold, environment configuration, and structured logging. Runtime routes and the browser demo are implemented in later waves.
 
-### 1. Configure local secrets
+### 1. Install dependencies
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 2. Configure local secrets
 
 Copy the example environment file and add your local server-side keys:
 
@@ -16,9 +24,13 @@ cp .env.example .env
 
 Set `ELEVENLABS_API_KEY` in `.env` from <https://elevenlabs.io/app/settings/api-keys>. Also set `OPENAI_API_KEY` for the FastAPI Custom LLM webhook and choose `OPENAI_MODEL` if you do not want the default. Do not paste keys into chat, commit them, or expose them in static/client-side code. Keys are for local/server-side tooling only.
 
-### 2. Expose the local FastAPI webhook
+## ElevenLabs agent setup without MCP
 
-Start this service locally, then expose it with ngrok or cloudflared. For ngrok:
+Use `scripts/elevenlabs_agent.py` to create or update the ElevenLabs Conversational AI agent directly through the ElevenLabs REST API. This direct workflow is the required setup path for this project. MCP tooling is optional only.
+
+### 1. Expose the local FastAPI webhook
+
+Once the FastAPI service is running locally on `PORT` (default `8001`), expose it with ngrok or cloudflared. For ngrok:
 
 ```bash
 ngrok http 8001
@@ -26,7 +38,7 @@ ngrok http 8001
 
 Copy the public HTTPS base URL, for example `https://abc123.ngrok-free.app`.
 
-### 3. Create the Frau Weber demo agent
+### 2. Create the Frau Weber demo agent
 
 ```bash
 python3 scripts/elevenlabs_agent.py create https://abc123.ngrok-free.app
@@ -58,7 +70,7 @@ python3 scripts/elevenlabs_agent.py create \
   https://abc123.ngrok-free.app
 ```
 
-### 4. Update the Custom LLM URL when ngrok changes
+### 3. Update the Custom LLM URL when ngrok changes
 
 When ngrok restarts, keep the same agent and patch its webhook URL:
 
@@ -74,7 +86,7 @@ python3 scripts/elevenlabs_agent.py update-url https://new-url.ngrok-free.app --
 
 The script never prints `ELEVENLABS_API_KEY`; it reads the key from the environment or `.env` only.
 
-### 5. Validate the script locally
+### 4. Validate the script locally
 
 ```bash
 python3 -m unittest discover -s tests -v

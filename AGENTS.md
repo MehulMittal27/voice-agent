@@ -310,9 +310,8 @@ Optional MCP path: the project `.mcp.json` follows the official `uvx elevenlabs-
 
 ## Environment (`.env.example`)
 ```
-# Server-side ElevenLabs credentials. Required for the official ElevenLabs MCP
-# server and for Conversational AI integration. Never expose this key in
-# static/client-side code.
+# Server-side ElevenLabs credentials for the direct Conversational AI setup.
+# MCP tooling is optional only. Never expose this key in static/client-side code.
 ELEVENLABS_API_KEY=xi-your-api-key
 ELEVENLABS_AGENT_ID=agent_your-agent-id
 # Optional direct API script overrides.

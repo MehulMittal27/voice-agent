@@ -11,6 +11,11 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
 
 # ElevenLabs MCP generated files
 .elevenlabs-mcp-output/

@@ -2,8 +2,8 @@
 """Create or update the ElevenLabs Conversational AI agent for the demo.
 
 This script intentionally uses the public ElevenLabs REST API with stdlib HTTP
-helpers so it works in the hackathon environment without Claude, MCP, or extra
-Python dependencies.
+helpers so it works in the hackathon environment without MCP or extra Python
+dependencies.
 """
 
 from __future__ import annotations
