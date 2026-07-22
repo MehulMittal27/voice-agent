@@ -27,6 +27,9 @@ class ElevenLabsAgentScriptTests(unittest.TestCase):
         self.assertEqual(agent["language"], "de")
         self.assertEqual(agent["first_message"], "")
         self.assertEqual(agent["prompt"]["llm"], "custom-llm")
+        prompt = agent["prompt"]["prompt"]
+        self.assertIn("perception_session_id={{perception_session_id}}", prompt)
+        self.assertIn("never read aloud", prompt)
         custom_llm = agent["prompt"]["custom_llm"]
         self.assertEqual(
             custom_llm["url"],

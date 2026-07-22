@@ -22,7 +22,11 @@ from voice_agent.perception_client import (
     PerceptionClientError,
     neutral_state,
 )
-from voice_agent.session import SessionInfo, session_store
+from voice_agent.session import (
+    DEMO_SESSION_FALLBACK_MAX_AGE,
+    SessionInfo,
+    session_store,
+)
 from voice_agent.webhook import router as webhook_router
 
 logger = logging.getLogger(__name__)
@@ -106,6 +110,7 @@ def _register_routes(app: FastAPI) -> None:
             )
 
         session = _create_or_reuse_local_session(perception_session_id)
+        session = session_store.touch(session.conversation_id) or session
         response = _session_start_payload(
             settings=settings,
             session=session,
@@ -131,6 +136,7 @@ def _register_routes(app: FastAPI) -> None:
         perception_session_id: str,
         request: Request,
     ) -> dict[str, Any]:
+        session_store.find_by_perception_id(perception_session_id)
         state = await _maybe_await(
             _perception_client(request).get_state(perception_session_id)
         )
@@ -237,6 +243,11 @@ def _session_start_payload(
 
 def _perception_session_fallback_enabled(session: SessionInfo) -> bool:
     fallback_session = session_store.get_unambiguous_active(touch=False)
+    if fallback_session is None:
+        fallback_session = session_store.get_latest_active(
+            touch=False,
+            max_age=DEMO_SESSION_FALLBACK_MAX_AGE,
+        )
     return (
         fallback_session is not None
         and fallback_session.conversation_id == session.conversation_id

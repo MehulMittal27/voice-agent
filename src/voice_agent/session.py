@@ -10,6 +10,7 @@ from typing import Any, Callable, Iterable, Mapping, Union
 from uuid import UUID, uuid4
 
 DEFAULT_SESSION_TTL = timedelta(minutes=30)
+DEMO_SESSION_FALLBACK_MAX_AGE = timedelta(minutes=2)
 
 ConversationId = Union[str, UUID]
 SessionMessage = dict[str, Any]
@@ -229,6 +230,31 @@ class SessionStore:
             if len(self._sessions) != 1:
                 return None
             session = next(iter(self._sessions.values()))
+            if touch:
+                session.touch(now)
+            return session
+
+    def get_latest_active(
+        self,
+        *,
+        touch: bool = True,
+        max_age: timedelta | None = None,
+    ) -> SessionInfo | None:
+        """Return the freshest active session, optionally bounded by age."""
+        if max_age is not None and max_age < timedelta(0):
+            raise ValueError("max_age must not be negative")
+
+        now = self._now()
+        with self._lock:
+            self.cleanup_expired(now=now)
+            if not self._sessions:
+                return None
+            session = max(
+                self._sessions.values(),
+                key=lambda candidate: (candidate.last_seen, candidate.created_at),
+            )
+            if max_age is not None and now - session.last_seen > max_age:
+                return None
             if touch:
                 session.touch(now)
             return session

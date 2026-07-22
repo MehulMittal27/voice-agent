@@ -837,7 +837,7 @@
           const mode = readString(session, ["perception_correlation_mode", "perceptionCorrelationMode"]);
           const fallbackEnabled = readBoolean(session, ["perception_fallback_enabled", "perceptionFallbackEnabled"]);
           if (fallbackEnabled || mode === "dynamic_variable_with_server_fallback") {
-            return "Perception correlation: direct dynamic variable; server fallback active.";
+            return "Perception correlation: direct dynamic variable; server fallback active (uses the latest active demo session if ElevenLabs omits the ID).";
           }
           return "Perception correlation: direct dynamic variable.";
         }

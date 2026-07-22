@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -40,6 +41,7 @@ class BrowserIntegrationTests(unittest.TestCase):
         self.assertIn('id="correlation-status"', html)
         self.assertIn("Perception correlation: direct dynamic variable", html)
         self.assertIn("server fallback active", html)
+        self.assertIn("latest active demo session", html)
 
     def test_webhook_extracts_elevenlabs_extra_body(self) -> None:
         session_id, source = extract_perception_session_id(
@@ -73,6 +75,25 @@ class BrowserIntegrationTests(unittest.TestCase):
             source,
             "conversation_initiation_client_data.dynamic_variables.perception_session_id",
         )
+
+    def test_webhook_extracts_system_message_marker(self) -> None:
+        session_id, source = extract_perception_session_id(
+            {
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are Frau Weber.\n"
+                            "System reference: perception_session_id: perception_123"
+                        ),
+                    },
+                    {"role": "user", "content": "hello"},
+                ],
+            }
+        )
+
+        self.assertEqual(session_id, "perception_123")
+        self.assertIn("system content perception_session_id marker", source)
 
     def test_session_start_returns_same_origin_perception_proxy_urls(self) -> None:
         app = create_app(
@@ -120,6 +141,25 @@ class BrowserIntegrationTests(unittest.TestCase):
             },
         )
 
+    def test_perception_state_polling_touches_local_session(self) -> None:
+        app = create_app(Settings(voice_perception_url="http://127.0.0.1:8000"))
+        app.state.perception_client = FakePerceptionClient()
+        session = session_store.create("perception_123")
+        old_last_seen = datetime.now(timezone.utc) - timedelta(minutes=5)
+        session.touch(old_last_seen)
+
+        with TestClient(app) as client:
+            response = client.get("/perception/state/perception_123")
+
+        touched_session = session_store.find_by_perception_id(
+            "perception_123",
+            touch=False,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNotNone(touched_session)
+        assert touched_session is not None
+        self.assertGreater(touched_session.last_seen, old_last_seen)
+
     def test_webhook_uses_single_active_session_when_body_lacks_id(self) -> None:
         app = create_app(
             Settings(
@@ -140,6 +180,49 @@ class BrowserIntegrationTests(unittest.TestCase):
             with TestClient(app) as client:
                 start_response = client.post("/session/start", json={})
                 self.assertEqual(start_response.status_code, 200)
+
+                webhook_response = client.post(
+                    "/v1/chat/completions",
+                    json={
+                        "model": "custom",
+                        "messages": [{"role": "user", "content": "hello"}],
+                        "stream": True,
+                    },
+                )
+        finally:
+            clerk.run_turn = original_run_turn
+
+        self.assertEqual(webhook_response.status_code, 200)
+        self.assertEqual(fake_client.session_id, "perception_123")
+        self.assertIn("HAPPY", webhook_response.text)
+        self.assertNotIn("NEUTRAL", webhook_response.text)
+
+    def test_webhook_uses_freshest_active_session_when_body_lacks_id(self) -> None:
+        app = create_app(
+            Settings(
+                elevenlabs_agent_id="agent_123",
+                openai_api_key="test-key",
+                voice_perception_url="http://127.0.0.1:8000",
+            )
+        )
+        fake_client = FakePerceptionClient()
+        app.state.perception_client = fake_client
+        old_a = session_store.create("old_perception_a")
+        old_b = session_store.create("old_perception_b")
+        old_a.touch(datetime.now(timezone.utc) - timedelta(minutes=10))
+        old_b.touch(datetime.now(timezone.utc) - timedelta(minutes=8))
+
+        async def fake_run_turn(messages, perception_state):  # type: ignore[no-untyped-def]
+            yield str(perception_state.get("emotion", "missing"))
+
+        original_run_turn = clerk.run_turn
+        clerk.run_turn = fake_run_turn
+        try:
+            with TestClient(app) as client:
+                start_response = client.post("/session/start", json={})
+                self.assertEqual(start_response.status_code, 200)
+                state_response = client.get("/perception/state/perception_123")
+                self.assertEqual(state_response.status_code, 200)
 
                 webhook_response = client.post(
                     "/v1/chat/completions",
