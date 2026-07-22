@@ -25,6 +25,9 @@ class SessionInfo:
     created_at: datetime
     last_seen: datetime
     message_history: list[SessionMessage] = field(default_factory=list)
+    english_mode: bool = False
+    english_offered: bool = False
+    high_hesitation_streak: int = 0
 
     def touch(self, when: datetime | None = None) -> None:
         """Mark the session as active at ``when`` or now."""
@@ -284,6 +287,80 @@ class SessionStore:
 
     def _now(self) -> datetime:
         return _coerce_utc(self._clock())
+
+
+_ENGLISH_REQUEST_PHRASES = (
+    "english",
+    "englisch",
+    "in english",
+    "auf englisch",
+    "speak english",
+    "switch to english",
+)
+_ENGLISH_ACCEPT_WORDS = (
+    "yes",
+    "ja",
+    "please",
+    "bitte",
+    "okay",
+    "ok",
+    "sure",
+    "gerne",
+)
+
+
+def update_language_state(
+    session: SessionInfo,
+    perception_state: dict,
+    last_user_message: str,
+) -> dict:
+    """Advance the sticky English-mode state machine for one turn.
+
+    Mutates ``session`` in place (streak counter and mode booleans) and returns
+    a small dict describing the language mode the webhook should build a prompt
+    block from.
+    """
+    hesitation = _coerce_hesitation(perception_state.get("hesitation_score"))
+    if hesitation > 0.75:
+        session.high_hesitation_streak += 1
+    else:
+        session.high_hesitation_streak = 0
+
+    lowered = last_user_message.lower()
+
+    if any(phrase in lowered for phrase in _ENGLISH_REQUEST_PHRASES):
+        session.english_mode = True
+        session.english_offered = True
+        return {"mode": "english_locked", "just_switched": True}
+
+    if session.english_offered and not session.english_mode:
+        if any(word in lowered for word in _ENGLISH_ACCEPT_WORDS):
+            session.english_mode = True
+            return {"mode": "english_locked", "just_switched": True}
+        return {"mode": "german_locked", "just_switched": False}
+
+    should_offer = (
+        not session.english_offered
+        and not session.english_mode
+        and (
+            session.high_hesitation_streak >= 2
+            or hesitation > 0.9
+        )
+    )
+    if should_offer:
+        session.english_offered = True
+        return {"mode": "offer_english", "just_switched": False}
+
+    if session.english_mode:
+        return {"mode": "english", "just_switched": False}
+    return {"mode": "german", "just_switched": False}
+
+
+def _coerce_hesitation(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _copy_messages(messages: Iterable[Mapping[str, Any]]) -> list[SessionMessage]:

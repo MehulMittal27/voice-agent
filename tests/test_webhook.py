@@ -32,7 +32,7 @@ class FakePerceptionClient:
         return True
 
 
-async def _fake_run_turn(messages, perception_state):  # type: ignore[no-untyped-def]
+async def _fake_run_turn(messages, perception_state, language_state):  # type: ignore[no-untyped-def]
     yield str(perception_state.get("emotion", "missing"))
 
 

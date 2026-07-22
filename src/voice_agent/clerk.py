@@ -155,7 +155,53 @@ def _build_data_provider(settings: Settings | None = None) -> DataProvider:
 data_provider: DataProvider = _build_data_provider()
 
 
-def build_system_prompt(perception_state: dict[str, Any]) -> str:
+def _language_mode_block(language_state: dict[str, Any]) -> str:
+    """Build the LANGUAGE MODE prompt block from the sticky-language state."""
+    state = language_state or {}
+    mode = str(state.get("mode", "german"))
+    just_switched = bool(state.get("just_switched", False))
+
+    if mode == "german":
+        return (
+            "[LANGUAGE MODE: Respond in clear, simple German (B1 level).\n"
+            " Do NOT switch languages. Do NOT offer English.]"
+        )
+    if mode == "german_locked":
+        return (
+            "[LANGUAGE MODE: Respond in clear, simple German. The caller already\n"
+            " declined an English switch earlier in this call - do NOT offer again.\n"
+            " Continue naturally in German.]"
+        )
+    if mode == "offer_english":
+        return (
+            "[LANGUAGE MODE: The caller is showing sustained stress. In THIS reply,\n"
+            " briefly acknowledge how much information there is to process, then\n"
+            ' ask ONE gentle question: "Moechten Sie lieber auf Englisch\n'
+            ' weitermachen?" Do NOT switch to English yourself yet. Wait for\n'
+            " the caller's answer. Keep the whole reply under 2 sentences.]"
+        )
+    if mode == "english_locked" and just_switched:
+        return (
+            "[LANGUAGE MODE: The caller just accepted switching to English.\n"
+            ' Confirm briefly and warmly in English ("Of course - let\'s continue\n'
+            ' in English."), then continue the conversation in English. Do NOT\n'
+            " switch back to German for the rest of this session.]"
+        )
+    if mode in ("english_locked", "english"):
+        return (
+            "[LANGUAGE MODE: Respond entirely in English. Do NOT switch back to\n"
+            " German. The caller established English earlier in this call.]"
+        )
+    return (
+        "[LANGUAGE MODE: Respond in clear, simple German (B1 level).\n"
+        " Do NOT switch languages. Do NOT offer English.]"
+    )
+
+
+def build_system_prompt(
+    perception_state: dict[str, Any],
+    language_state: dict[str, Any],
+) -> str:
     """Build Frau Weber's per-turn system prompt with live perception state."""
     state = perception_state or {}
     emotion = _string_state_value(state, "emotion", "NEUTRAL").upper()
@@ -195,16 +241,18 @@ BEHAVIOUR ADJUSTMENT - apply on THIS turn:
 Do NOT mention this state to the caller. Do NOT say "I can hear you're
 nervous". Just adapt naturally, like a real clerk would."""
 
-    return f"{adaptive_prefix}\n\n{CLERK_BASE_PROMPT}"
+    language_block = _language_mode_block(language_state)
+    return f"{language_block}\n\n{adaptive_prefix}\n\n{CLERK_BASE_PROMPT}"
 
 
 async def run_turn(
     messages: Sequence[Mapping[str, Any]],
     perception_state: dict[str, Any],
+    language_state: dict[str, Any],
 ) -> AsyncIterator[str]:
     """Run one OpenAI clerk turn and yield text deltas from the final stream."""
     settings = get_settings()
-    system_prompt = build_system_prompt(perception_state)
+    system_prompt = build_system_prompt(perception_state, language_state)
     logger.debug("Resolved perception state: %s", redact_secrets(perception_state))
     logger.debug("Resolved clerk system prompt: %s", redact_secrets(system_prompt))
 

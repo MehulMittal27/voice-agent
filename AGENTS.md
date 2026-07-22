@@ -224,6 +224,19 @@ Do NOT mention this state to the caller. Do NOT say "I can hear you're
 nervous". Just adapt naturally, like a real clerk would.
 ```
 
+## Sticky English-mode switching
+
+The clerk stays German by default but can switch to English for the rest of a
+session. The state machine lives in `session.py::update_language_state` (streak
+counter + `english_mode`/`english_offered` on `SessionInfo`): sustained stress
+(two turns hesitation > 0.75, or one turn > 0.9) triggers a ONE-TIME offer; an
+accept word or an explicit English request locks English permanently for the
+session. The webhook calls it per turn and passes the resulting `language_state`
+dict through `clerk.run_turn` into `build_system_prompt`, which prepends a
+LANGUAGE MODE block. Language is sticky at session level only - no per-token
+code-switching. See `tests/test_session.py` for the state-machine cases and
+`scripts/test_webhook.py --synthetic` for the end-to-end offer/accept checks.
+
 ## Tools (mocked tonight, real tomorrow)
 
 `data/base.py`:

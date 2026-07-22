@@ -6,6 +6,7 @@ import inspect
 import json
 import logging
 import re
+from datetime import datetime, timezone
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
@@ -19,6 +20,7 @@ from voice_agent.session import (
     DEMO_SESSION_FALLBACK_MAX_AGE,
     SessionInfo,
     session_store,
+    update_language_state,
 )
 from voice_agent.streaming import openai_to_openai_sse
 
@@ -76,6 +78,21 @@ _DEMO_FALLBACK_ID_SOURCES = frozenset(
 )
 
 
+def _transient_session() -> SessionInfo:
+    """Build an unstored session so the language state machine still runs.
+
+    Used only when no local session was resolved for this webhook turn. It is
+    never persisted, so streak state cannot carry across turns in that path.
+    """
+    now = datetime.now(timezone.utc)
+    return SessionInfo(
+        conversation_id="",
+        perception_session_id="",
+        created_at=now,
+        last_seen=now,
+    )
+
+
 def _correlation_mode(id_source: str) -> str:
     """Map an id_source string to a human-readable LLM-turn correlation mode.
 
@@ -118,7 +135,29 @@ async def chat_completions(request: Request) -> StreamingResponse:
 
     _log_injected_perception(perception_session_id, id_source, perception_state)
 
-    text_stream = clerk.run_turn(messages, perception_state)
+    last_user_msg = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            last_user_msg = m.get("content", "") or ""
+            break
+    if not isinstance(last_user_msg, str):
+        last_user_msg = ""
+
+    language_session = session if session is not None else _transient_session()
+    language_state = update_language_state(
+        session=language_session,
+        perception_state=perception_state,
+        last_user_message=last_user_msg,
+    )
+    logger.info(
+        "language_state session=%s mode=%s just_switched=%s streak=%d",
+        perception_session_id or "missing",
+        language_state["mode"],
+        language_state["just_switched"],
+        language_session.high_hesitation_streak,
+    )
+
+    text_stream = clerk.run_turn(messages, perception_state, language_state)
     sse_stream = openai_to_openai_sse(_ensure_async_text_stream(text_stream))
     return StreamingResponse(
         sse_stream,
