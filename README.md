@@ -1,179 +1,122 @@
 # voice-agent
 
-Voice Agent service for a live German recognition-office clerk demo using ElevenLabs Conversational AI, OpenAI, and the companion voice-perception service.
+Live voice demo for a German recognition-office clerk using ElevenLabs Conversational AI, OpenAI, and the companion `voice-perception` service.
 
-## Local setup
+## Quickstart
 
-Wave 0 provides the project scaffold, environment configuration, and structured logging. Runtime routes and the browser demo are implemented in later waves.
+Run commands from the repo root.
 
-### 1. Install dependencies
+### 0. Prerequisites
 
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
+- Python 3.11
+- An OpenAI API key and an ElevenLabs API key
+- `ngrok` or another HTTPS tunnel for ElevenLabs to reach your local webhook
+- The companion `voice-perception` service cloned and running separately: <https://github.com/mehulmittal27/voice-perception>
 
-### 2. Configure local secrets
+By default this app expects `voice-perception` at `http://127.0.0.1:8000`.
 
-Copy the example environment file and add your local server-side keys:
+### 1. Configure `.env`
 
 ```bash
 cp .env.example .env
 ```
 
-Set `ELEVENLABS_API_KEY` in `.env` from <https://elevenlabs.io/app/settings/api-keys>. Also set `OPENAI_API_KEY` for the FastAPI Custom LLM webhook and choose `OPENAI_MODEL` if you do not want the default. Do not paste keys into chat, commit them, or expose them in static/client-side code. Keys are for local/server-side tooling only.
+Edit `.env`:
 
-## ElevenLabs agent setup without MCP
+```bash
+OPENAI_API_KEY=sk-...
+ELEVENLABS_API_KEY=xi-...
+ELEVENLABS_AGENT_ID=
+VOICE_PERCEPTION_URL=http://127.0.0.1:8000
+PERCEPTION_LANGUAGE=en
+OPENAI_MODEL=gpt-4o-mini
+```
 
-Use `scripts/elevenlabs_agent.py` to create or update the ElevenLabs Conversational AI agent directly through the ElevenLabs REST API. This direct workflow is the required setup path for this project. MCP tooling is optional only.
+Leave `ELEVENLABS_AGENT_ID` blank until the agent is created. Keep all keys server-side only.
 
-### 1. Expose the local FastAPI webhook
+### 2. Create and activate a virtualenv
 
-Once the FastAPI service is running locally on `PORT` (default `8001`), expose it with ngrok or cloudflared. For ngrok:
+```bash
+python -m venv .venv && source .venv/bin/activate
+```
+
+### 3. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Start voice-agent
+
+```bash
+export PYTHONPATH=src
+uvicorn voice_agent.main:app --port 8001 --reload
+```
+
+Keep this terminal running. Health check: <http://localhost:8001/health>.
+
+### 5. Expose the local webhook
+
+In a second terminal:
 
 ```bash
 ngrok http 8001
 ```
 
-Copy the public HTTPS base URL, for example `https://abc123.ngrok-free.app`.
+Copy the HTTPS URL, for example `https://abc123.ngrok-free.app`.
 
-### 2. Create the Frau Weber demo agent
+### 6. Create or update the ElevenLabs agent
+
+First time:
 
 ```bash
 python3 scripts/elevenlabs_agent.py create https://abc123.ngrok-free.app
 ```
 
-The script configures:
+If you already have an `ELEVENLABS_AGENT_ID` in `.env`, update the existing agent instead:
 
-- Agent name `zollhof-clerk-demo`
-- German output language (`de`) with an empty first message
-- Low-latency `eleven_flash_v2_5` TTS
-- Custom LLM URL `https://abc123.ngrok-free.app/v1/chat/completions`
-- Placeholder Custom LLM auth token for the local no-auth webhook
-- Dynamic variable placeholder `perception_session_id`
+```bash
+python3 scripts/elevenlabs_agent.py update-url https://abc123.ngrok-free.app
+```
 
-It prints an `.env` line like:
+The script configures the Conversational AI agent with German output, `eleven_flash_v2_5` TTS, the Custom LLM URL `<ngrok-url>/v1/chat/completions`, and the `perception_session_id` dynamic variable. It reads `ELEVENLABS_API_KEY` from `.env` or the environment and never prints the key.
+
+### 7. Save the agent ID and restart
+
+After `create`, copy the printed line into `.env`:
 
 ```bash
 ELEVENLABS_AGENT_ID=agent_...
 ```
 
-Copy that line into your local `.env`.
+Restart `uvicorn` so the browser session endpoint returns the agent ID.
 
-Optional overrides are available for hackathon tuning:
+### 8. Run the browser demo
 
-```bash
-python3 scripts/elevenlabs_agent.py create \
-  --voice-id <german-capable-voice-id> \
-  --tts-model eleven_flash_v2_5 \
-  https://abc123.ngrok-free.app
-```
+Open <http://localhost:8001>, click **Start**, grant microphone access, and speak English. Frau Weber should respond in German while adapting to the live perception state.
 
-### 3. Update the Custom LLM URL when ngrok changes
+## Refreshing ngrok URLs
 
-When ngrok restarts, keep the same agent and patch its webhook URL:
+Free ngrok URLs change after restart. Do not create a new ElevenLabs agent for that. Keep the same `ELEVENLABS_AGENT_ID` in `.env` and run:
 
 ```bash
 python3 scripts/elevenlabs_agent.py update-url https://new-url.ngrok-free.app
 ```
 
-The script reads `ELEVENLABS_AGENT_ID` from `.env`. You can also pass it explicitly:
+Then continue using the same browser demo.
 
-```bash
-python3 scripts/elevenlabs_agent.py update-url https://new-url.ngrok-free.app --agent-id agent_...
-```
+## Local validation
 
-The script never prints `ELEVENLABS_API_KEY`; it reads the key from the environment or `.env` only.
-
-### 4. Validate the script locally
+With the virtualenv active and `PYTHONPATH=src` set:
 
 ```bash
 python3 -m unittest discover -s tests -v
+python scripts/test_perception_client.py
+python scripts/test_webhook.py
 ```
 
-## Optional ElevenLabs MCP setup
+`test_webhook.py` exercises the OpenAI webhook path and requires `OPENAI_API_KEY`.
 
-This repo still includes project-level MCP configuration in `.mcp.json` for the official ElevenLabs MCP server (`elevenlabs/elevenlabs-mcp`). Use it only if you want MCP tooling. The config follows the official `uvx elevenlabs-mcp` pattern from <https://github.com/elevenlabs/elevenlabs-mcp>.
+## Optional ElevenLabs MCP tooling
 
-### 1. Install prerequisites
-
-Install `uv` if `uvx` is not already available:
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-uvx --version
-```
-
-### 2. Configure local MCP secrets
-
-The committed `.mcp.json` contains the official placeholder `"<insert-your-api-key-here>"`, not a real key. Replace that placeholder only in your private MCP client config, or use your MCP client's secret/environment-variable support to pass `ELEVENLABS_API_KEY` locally.
-
-### 3. Use the project MCP config
-
-The official quickstart config is `command: "uvx"`, `args: ["elevenlabs-mcp"]`, and an `env` block containing `ELEVENLABS_API_KEY`. This repo's `.mcp.json` keeps the same shape but uses a placeholder key so secrets stay out of git:
-
-```json
-{
-  "mcpServers": {
-    "ElevenLabs": {
-      "command": "uvx",
-      "args": ["elevenlabs-mcp"],
-      "env": {
-        "ELEVENLABS_API_KEY": "<insert-your-api-key-here>",
-        "ELEVENLABS_MCP_BASE_PATH": ".elevenlabs-mcp-output",
-        "ELEVENLABS_MCP_OUTPUT_MODE": "files"
-      }
-    }
-  }
-}
-```
-
-Before connecting an MCP client, copy the server block into private client configuration and replace the placeholder with your local key, or configure the client to inject `ELEVENLABS_API_KEY` from a private secret store. Keep that private config untracked.
-
-Generated files are written under `.elevenlabs-mcp-output/`, which is ignored by git. These optional output settings are documented by the official MCP server.
-
-### 4. Verify locally
-
-Without using credits, confirm the official MCP package installs and can print a client config with a placeholder key:
-
-```bash
-pip install elevenlabs-mcp
-python -m elevenlabs_mcp --api-key=dummy --print
-```
-
-If you prefer not to install the package globally, this equivalent `uvx` check is also useful:
-
-```bash
-uvx --from elevenlabs-mcp python -m elevenlabs_mcp --api-key=dummy --print
-```
-
-After adding a valid `ELEVENLABS_API_KEY`, verify the key can reach ElevenLabs without printing it:
-
-```bash
-python - <<'PY'
-import os
-import sys
-import urllib.request
-from pathlib import Path
-
-if not os.environ.get("ELEVENLABS_API_KEY") and Path(".env").exists():
-    for line in Path(".env").read_text().splitlines():
-        if line.startswith("ELEVENLABS_API_KEY="):
-            os.environ["ELEVENLABS_API_KEY"] = line.split("=", 1)[1].strip()
-            break
-
-key = os.environ.get("ELEVENLABS_API_KEY")
-if not key or key.startswith("xi-your"):
-    sys.exit("ELEVENLABS_API_KEY is not configured in the environment or .env")
-
-request = urllib.request.Request(
-    "https://api.elevenlabs.io/v1/user",
-    headers={"xi-api-key": key},
-)
-with urllib.request.urlopen(request, timeout=20) as response:
-    print(f"ElevenLabs reachable: HTTP {response.status}")
-PY
-```
-
-Then open your MCP client and confirm the `ElevenLabs` server connects and lists tools. Tool calls may consume ElevenLabs credits.
+Use the direct `scripts/elevenlabs_agent.py` workflow above for normal setup. MCP is optional convenience only. If you use MCP, keep real API keys out of the committed `.mcp.json`; use private client config or environment variables instead. Generated MCP output belongs under `.elevenlabs-mcp-output/`, which is ignored by git.
