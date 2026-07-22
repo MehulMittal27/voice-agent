@@ -21,7 +21,9 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from voice_agent import clerk
 from voice_agent.config import load_settings
+from voice_agent.session import SessionInfo, update_language_state
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8001"
 BASE_URL_ENV_VARS = ("VOICE_AGENT_URL", "VOICE_AGENT_BASE_URL")
@@ -221,6 +223,120 @@ def _build_webhook_payload(
     }
 
 
+def _fresh_synthetic_session() -> SessionInfo:
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    return SessionInfo(
+        conversation_id="synthetic",
+        perception_session_id="synthetic",
+        created_at=now,
+        last_seen=now,
+    )
+
+
+async def _collect_clerk_text(
+    user_message: str,
+    perception_state: dict[str, Any],
+    language_state: dict[str, Any],
+) -> str:
+    messages = [{"role": "user", "content": user_message}]
+    parts: list[str] = []
+    async for delta in clerk.run_turn(messages, perception_state, language_state):
+        parts.append(delta)
+    return "".join(parts)
+
+
+def _count_english_words(text: str) -> int:
+    lowered = text.lower()
+    english_markers = ("the", "you", "your", "understand", "can", "help", "of", "course")
+    return sum(1 for word in english_markers if word in lowered)
+
+
+async def _run_synthetic_cases() -> int:
+    """Exercise the sticky English-mode state machine end-to-end in-process.
+
+    These cases drive perception state and prior offer state directly, so they
+    validate the state machine and prompt wiring without a running server or a
+    live perception service. They still call OpenAI, so OPENAI_API_KEY must be
+    set.
+    """
+    settings = load_settings(PROJECT_ROOT / ".env")
+    if _missing_openai_key(settings.openai_api_key):
+        raise WebhookSmokeTestError(
+            "OPENAI_API_KEY is not configured. Set it in .env or the environment "
+            "before running the synthetic state-machine cases."
+        )
+
+    failures: list[str] = []
+
+    # sustained_stress: two consecutive hesitation=0.8 turns fire the offer.
+    session = _fresh_synthetic_session()
+    stressed = {"hesitation_score": 0.8, "emotion": "FEARFUL"}
+    first = update_language_state(session, stressed, "hmm... ich weiss nicht")
+    second = update_language_state(session, stressed, "das ist... schwer")
+    print(f"sustained_stress: first_mode={first['mode']} second_mode={second['mode']}")
+    if second["mode"] != "offer_english":
+        failures.append(
+            f"sustained_stress: expected offer_english on second turn, got {second['mode']}"
+        )
+    else:
+        offer_text = await _collect_clerk_text("das ist... schwer", stressed, second)
+        print(f"sustained_stress_reply: {offer_text}")
+        if "Englisch" not in offer_text:
+            failures.append(
+                "sustained_stress: offer reply did not contain 'Englisch'"
+            )
+
+    # accept_english: after an offer, 'yes please' locks English.
+    session = _fresh_synthetic_session()
+    session.english_offered = True
+    accepted = update_language_state(session, {"hesitation_score": 0.3}, "yes please")
+    print(f"accept_english: mode={accepted['mode']} just_switched={accepted['just_switched']}")
+    if not (accepted["mode"] == "english_locked" and accepted["just_switched"]):
+        failures.append(
+            f"accept_english: expected english_locked/just_switched, got {accepted}"
+        )
+    else:
+        accept_text = await _collect_clerk_text(
+            "yes please", {"hesitation_score": 0.3}, accepted
+        )
+        print(f"accept_english_reply: {accept_text}")
+        english_count = _count_english_words(accept_text)
+        if english_count < 3:
+            failures.append(
+                f"accept_english: reply not clearly English (matched {english_count} markers)"
+            )
+
+    # explicit_request: an explicit request switches immediately, no offer.
+    session = _fresh_synthetic_session()
+    explicit = update_language_state(session, {"hesitation_score": 0.1}, "can you speak english")
+    print(f"explicit_request: mode={explicit['mode']} just_switched={explicit['just_switched']}")
+    if not (explicit["mode"] == "english_locked" and explicit["just_switched"]):
+        failures.append(
+            f"explicit_request: expected english_locked/just_switched, got {explicit}"
+        )
+    else:
+        explicit_text = await _collect_clerk_text(
+            "can you speak english", {"hesitation_score": 0.1}, explicit
+        )
+        print(f"explicit_request_reply: {explicit_text}")
+        if _count_english_words(explicit_text) < 3:
+            failures.append("explicit_request: reply not clearly English")
+        if "weitermachen" in explicit_text.lower():
+            failures.append("explicit_request: reply contained the German offer sentence")
+
+    if failures:
+        for failure in failures:
+            print(f"synthetic_failure: {failure}", file=sys.stderr)
+        raise WebhookSmokeTestError(
+            f"{len(failures)} synthetic state-machine case(s) failed"
+        )
+
+    print("synthetic_state_machine: all cases passed")
+    return 0
+
+
 def _normalize_base_url(raw_base_url: str) -> str:
     trimmed = raw_base_url.strip().rstrip("/")
     if not trimmed:
@@ -354,12 +470,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=90.0,
         help="HTTP timeout in seconds for server and OpenAI-backed streaming calls.",
     )
+    parser.add_argument(
+        "--synthetic",
+        action="store_true",
+        help=(
+            "Run the in-process sticky English-mode state-machine cases instead "
+            "of the live HTTP flow. Needs OPENAI_API_KEY but no running server."
+        ),
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
+        if args.synthetic:
+            return asyncio.run(_run_synthetic_cases())
         return asyncio.run(run(args))
     except WebhookSmokeTestError as exc:
         print(f"error: {exc}", file=sys.stderr)

@@ -171,7 +171,7 @@ class BrowserIntegrationTests(unittest.TestCase):
         fake_client = FakePerceptionClient()
         app.state.perception_client = fake_client
 
-        async def fake_run_turn(messages, perception_state):  # type: ignore[no-untyped-def]
+        async def fake_run_turn(messages, perception_state, language_state):  # type: ignore[no-untyped-def]
             yield str(perception_state.get("emotion", "missing"))
 
         original_run_turn = clerk.run_turn
@@ -212,7 +212,7 @@ class BrowserIntegrationTests(unittest.TestCase):
         old_a.touch(datetime.now(timezone.utc) - timedelta(minutes=10))
         old_b.touch(datetime.now(timezone.utc) - timedelta(minutes=8))
 
-        async def fake_run_turn(messages, perception_state):  # type: ignore[no-untyped-def]
+        async def fake_run_turn(messages, perception_state, language_state):  # type: ignore[no-untyped-def]
             yield str(perception_state.get("emotion", "missing"))
 
         original_run_turn = clerk.run_turn

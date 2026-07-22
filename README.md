@@ -96,6 +96,16 @@ Restart `uvicorn` so the browser session endpoint returns the agent ID.
 
 Open <http://localhost:8001>, click **Start**, grant microphone access, and speak English. Frau Weber should respond in German while adapting to the live perception state.
 
+### How the demo works
+
+The clerk speaks German by default. If the perception layer detects
+sustained stress (two consecutive turns with hesitation > 0.75, or
+any single turn > 0.9), she offers ONCE to switch to English.
+If the caller accepts (yes / ja / okay / please), the rest of the
+session runs in English. The offer is never repeated. Callers can
+also request English explicitly at any point ("in English please")
+for an immediate switch.
+
 ## Refreshing ngrok URLs
 
 Free ngrok URLs change after restart. Do not create a new ElevenLabs agent for that. Keep the same `ELEVENLABS_AGENT_ID` in `.env` and run:
