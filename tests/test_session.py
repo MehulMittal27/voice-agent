@@ -58,6 +58,51 @@ class UpdateLanguageStateTests(unittest.TestCase):
         self.assertTrue(session.english_mode)
         self.assertTrue(session.english_offered)
 
+    def test_german_explicit_requests_flip_immediately(self) -> None:
+        for phrase in (
+            "sprechen sie englisch",
+            "können wir englisch sprechen",
+            "auf englisch bitte",
+            "can we speak english",
+            "continue in english",
+        ):
+            with self.subTest(phrase=phrase):
+                session = _fresh_session()
+                result = update_language_state(
+                    session, {"hesitation_score": 0.1}, phrase
+                )
+                self.assertEqual(result["mode"], "english_locked")
+                self.assertTrue(result["just_switched"])
+                self.assertTrue(session.english_mode)
+                self.assertTrue(session.english_offered)
+
+    def test_explicit_request_overrides_prior_decline(self) -> None:
+        session = _fresh_session()
+        update_language_state(session, {"hesitation_score": 0.95}, "was")
+        declined = update_language_state(
+            session, {"hesitation_score": 0.3}, "no keep going"
+        )
+        self.assertEqual(declined["mode"], "german_locked")
+        self.assertFalse(session.english_mode)
+        # A later explicit request overrides the earlier decline.
+        switched = update_language_state(
+            session, {"hesitation_score": 0.3}, "in english please"
+        )
+        self.assertEqual(switched["mode"], "english_locked")
+        self.assertTrue(switched["just_switched"])
+        self.assertTrue(session.english_mode)
+
+    def test_substring_eng_does_not_false_positive(self) -> None:
+        session = _fresh_session()
+        result = update_language_state(
+            session,
+            {"hesitation_score": 0.1},
+            "ich war in england und der flur war sehr eng",
+        )
+        self.assertEqual(result["mode"], "german")
+        self.assertFalse(session.english_mode)
+        self.assertFalse(session.english_offered)
+
     def test_streak_resets_when_hesitation_drops(self) -> None:
         session = _fresh_session()
         update_language_state(session, {"hesitation_score": 0.8}, "hmm")
