@@ -3,12 +3,1263 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Voice Agent</title>
+    <title>ZOLLHOF Recognition Clerk - Live Demo</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f1e8;
+        --panel: #fffaf0;
+        --panel-strong: #fff3db;
+        --ink: #1f2933;
+        --muted: #657282;
+        --line: #eadcc8;
+        --accent: #dc4d1e;
+        --accent-dark: #a93815;
+        --good: #1c7c54;
+        --warn: #b7791f;
+        --bad: #b42318;
+        --shadow: 0 18px 55px rgba(47, 34, 17, 0.12);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at top left, rgba(220, 77, 30, 0.16), transparent 30rem),
+          linear-gradient(135deg, #fff9ed 0%, var(--bg) 52%, #efe4d4 100%);
+        color: var(--ink);
+      }
+
+      button,
+      input,
+      textarea {
+        font: inherit;
+      }
+
+      .app-shell {
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 28px 0 36px;
+      }
+
+      .hero {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        margin-bottom: 22px;
+      }
+
+      .hero h1 {
+        margin: 0;
+        font-size: clamp(1.8rem, 4vw, 3.2rem);
+        line-height: 1;
+        letter-spacing: -0.05em;
+      }
+
+      .hero p {
+        margin: 10px 0 0;
+        max-width: 640px;
+        color: var(--muted);
+        font-size: 1rem;
+      }
+
+      .session-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-width: fit-content;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(255, 250, 240, 0.76);
+        padding: 9px 13px;
+        color: var(--muted);
+        box-shadow: 0 8px 25px rgba(47, 34, 17, 0.08);
+      }
+
+      .session-chip code {
+        color: var(--ink);
+        font-size: 0.82rem;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.45fr) minmax(310px, 0.9fr);
+        gap: 22px;
+        align-items: stretch;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 28px;
+        background: rgba(255, 250, 240, 0.88);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(14px);
+      }
+
+      .left-panel {
+        display: grid;
+        grid-template-rows: auto minmax(420px, 1fr);
+        overflow: hidden;
+      }
+
+      .controls {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 18px;
+        align-items: center;
+        padding: 22px;
+        border-bottom: 1px solid var(--line);
+        background: linear-gradient(180deg, rgba(255, 243, 219, 0.72), rgba(255, 250, 240, 0));
+      }
+
+      .primary-button {
+        min-width: 138px;
+        border: 0;
+        border-radius: 18px;
+        padding: 15px 24px;
+        background: var(--accent);
+        color: #fff;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+        cursor: pointer;
+        box-shadow: 0 12px 26px rgba(220, 77, 30, 0.28);
+        transition: transform 150ms ease, box-shadow 150ms ease, background 150ms ease;
+      }
+
+      .primary-button:hover:not(:disabled) {
+        transform: translateY(-1px);
+        background: #c6461c;
+        box-shadow: 0 16px 30px rgba(220, 77, 30, 0.32);
+      }
+
+      .primary-button:disabled {
+        cursor: wait;
+        opacity: 0.64;
+      }
+
+      .primary-button.stop {
+        background: #26323f;
+        box-shadow: 0 12px 26px rgba(31, 41, 51, 0.24);
+      }
+
+      .status-card {
+        display: grid;
+        gap: 7px;
+        min-width: 0;
+      }
+
+      .connection-status {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 1.02rem;
+        font-weight: 750;
+      }
+
+      .status-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        background: #9aa6b2;
+        box-shadow: 0 0 0 4px rgba(154, 166, 178, 0.15);
+      }
+
+      .status-dot[data-state="starting"],
+      .status-dot[data-state="stopping"] {
+        background: var(--warn);
+        box-shadow: 0 0 0 4px rgba(183, 121, 31, 0.16);
+      }
+
+      .status-dot[data-state="connected"] {
+        background: var(--good);
+        box-shadow: 0 0 0 4px rgba(28, 124, 84, 0.16);
+      }
+
+      .status-dot[data-state="error"] {
+        background: var(--bad);
+        box-shadow: 0 0 0 4px rgba(180, 35, 24, 0.16);
+      }
+
+      .status-meta,
+      .perception-meta {
+        color: var(--muted);
+        font-size: 0.91rem;
+        line-height: 1.36;
+      }
+
+      .status-error {
+        color: var(--bad);
+        font-weight: 700;
+      }
+
+      .transcript {
+        padding: 22px;
+        overflow: auto;
+        min-height: 420px;
+        max-height: 64vh;
+      }
+
+      .empty-state {
+        height: 100%;
+        min-height: 320px;
+        display: grid;
+        place-items: center;
+        text-align: center;
+        color: var(--muted);
+        border: 1px dashed #decab0;
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.28);
+        padding: 28px;
+      }
+
+      .turn {
+        display: grid;
+        gap: 6px;
+        max-width: 82%;
+        margin-bottom: 16px;
+      }
+
+      .turn.user {
+        margin-left: auto;
+        justify-items: end;
+      }
+
+      .turn.clerk {
+        justify-items: start;
+      }
+
+      .turn-label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 0.76rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .bubble {
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 13px 15px;
+        line-height: 1.42;
+        background: #fff;
+        box-shadow: 0 10px 20px rgba(47, 34, 17, 0.08);
+        white-space: pre-wrap;
+      }
+
+      .turn.user .bubble {
+        background: #26323f;
+        color: #fff;
+        border-color: #26323f;
+      }
+
+      .right-panel {
+        padding: 22px;
+        display: grid;
+        gap: 18px;
+        align-content: start;
+      }
+
+      .panel-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .panel-heading h2 {
+        margin: 0;
+        font-size: 1.25rem;
+        letter-spacing: -0.02em;
+      }
+
+      .live-badge {
+        border-radius: 999px;
+        padding: 5px 10px;
+        background: #e8ecef;
+        color: #52606d;
+        font-size: 0.76rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .live-badge[data-state="live"] {
+        background: rgba(28, 124, 84, 0.12);
+        color: var(--good);
+      }
+
+      .live-badge[data-state="warn"] {
+        background: rgba(183, 121, 31, 0.14);
+        color: var(--warn);
+      }
+
+      .live-badge[data-state="error"] {
+        background: rgba(180, 35, 24, 0.12);
+        color: var(--bad);
+      }
+
+      .perception-card {
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        padding: 18px;
+        background: rgba(255, 255, 255, 0.46);
+      }
+
+      .emotion-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .emotion-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 126px;
+        border-radius: 999px;
+        padding: 9px 14px;
+        background: #e8ecef;
+        color: #44515f;
+        font-weight: 850;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .emotion-pill.neutral {
+        background: rgba(82, 96, 109, 0.12);
+        color: #44515f;
+      }
+
+      .emotion-pill.happy {
+        background: rgba(28, 124, 84, 0.13);
+        color: var(--good);
+      }
+
+      .emotion-pill.fearful,
+      .emotion-pill.sad,
+      .emotion-pill.angry {
+        background: rgba(180, 35, 24, 0.12);
+        color: var(--bad);
+      }
+
+      .metric-label {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 8px;
+        color: var(--muted);
+        font-size: 0.86rem;
+        font-weight: 750;
+      }
+
+      .bar {
+        height: 14px;
+        border-radius: 999px;
+        background: #e7ddd0;
+        overflow: hidden;
+        border: 1px solid rgba(101, 114, 130, 0.15);
+      }
+
+      .bar-fill {
+        width: 0%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--good), var(--warn), var(--bad));
+        transition: width 180ms ease;
+      }
+
+      .event-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        min-height: 35px;
+        margin-top: 12px;
+      }
+
+      .event-pill {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 7px 10px;
+        background: var(--panel-strong);
+        color: #5e4933;
+        font-size: 0.84rem;
+        font-weight: 750;
+      }
+
+      .event-pill.empty {
+        background: #fff;
+        color: var(--muted);
+        font-weight: 650;
+      }
+
+      .raw-panel {
+        margin-top: 22px;
+        overflow: hidden;
+      }
+
+      .raw-panel summary {
+        cursor: pointer;
+        padding: 17px 20px;
+        font-weight: 800;
+      }
+
+      .raw-panel pre {
+        margin: 0;
+        max-height: 280px;
+        overflow: auto;
+        border-top: 1px solid var(--line);
+        padding: 18px 20px;
+        background: #1f2933;
+        color: #f8fafc;
+        font-size: 0.82rem;
+        line-height: 1.5;
+      }
+
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      @media (max-width: 860px) {
+        .hero {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .grid {
+          grid-template-columns: 1fr;
+        }
+
+        .controls {
+          grid-template-columns: 1fr;
+        }
+
+        .primary-button {
+          width: 100%;
+        }
+
+        .turn {
+          max-width: 95%;
+        }
+      }
+    </style>
   </head>
   <body>
-    <main>
-      <h1>Voice Agent Service</h1>
-      <p>Wave 0 scaffold. Browser demo UI arrives in a later wave.</p>
+    <main class="app-shell">
+      <header class="hero" aria-labelledby="page-title">
+        <div>
+          <h1 id="page-title">ZOLLHOF Recognition Clerk - Live Demo</h1>
+          <p>Speak English. Frau Weber responds in simple German while the perception service tracks live emotion, audio events, and hesitation.</p>
+        </div>
+        <div class="session-chip" aria-live="polite">
+          <span>Session</span>
+          <code id="session-id">not started</code>
+        </div>
+      </header>
+
+      <section class="grid" aria-label="Live voice agent demo">
+        <section class="panel left-panel" aria-labelledby="conversation-heading">
+          <div class="controls">
+            <button id="start-stop-button" class="primary-button" type="button">Start</button>
+            <div class="status-card" role="status" aria-live="polite">
+              <div class="connection-status">
+                <span id="status-dot" class="status-dot" data-state="idle" aria-hidden="true"></span>
+                <span id="connection-status">Idle</span>
+              </div>
+              <div id="session-status" class="status-meta">Press Start to open the microphone and connect to ElevenLabs.</div>
+              <div id="perception-status" class="status-meta">Perception idle.</div>
+            </div>
+          </div>
+
+          <div class="transcript" id="transcript" aria-live="polite" aria-label="Live transcript">
+            <div id="empty-transcript" class="empty-state">
+              <div>
+                <h2 id="conversation-heading">Live transcript</h2>
+                <p>User and clerk turns will appear here with timestamps once the call starts.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <aside class="panel right-panel" aria-labelledby="perception-heading">
+          <div class="panel-heading">
+            <h2 id="perception-heading">Perception state</h2>
+            <span id="perception-live-badge" class="live-badge" data-state="idle">Idle</span>
+          </div>
+
+          <div class="perception-card">
+            <div class="emotion-row">
+              <div>
+                <div class="status-meta">Emotion</div>
+                <div id="emotion-pill" class="emotion-pill neutral">NEUTRAL</div>
+              </div>
+              <div class="perception-meta" id="emotion-confidence">confidence 0.00</div>
+            </div>
+
+            <div class="metric-label">
+              <span>Hesitation</span>
+              <span id="hesitation-value">0%</span>
+            </div>
+            <div class="bar" aria-hidden="true">
+              <div id="hesitation-fill" class="bar-fill"></div>
+            </div>
+            <label class="sr-only" for="hesitation-meter">Hesitation score</label>
+            <meter id="hesitation-meter" min="0" max="1" low="0.4" high="0.7" optimum="0" value="0" class="sr-only">0</meter>
+          </div>
+
+          <div class="perception-card">
+            <div class="metric-label">
+              <span>Audio events</span>
+              <span id="audio-event-count">0</span>
+            </div>
+            <div id="audio-events" class="event-list" aria-live="polite">
+              <span class="event-pill empty">No events yet</span>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <details class="panel raw-panel">
+        <summary>Raw perception JSON</summary>
+        <pre id="raw-perception-json">{}</pre>
+      </details>
     </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@11labs/client@latest/dist/index.min.js"></script>
+    <script>
+      (() => {
+        "use strict";
+
+        const POLL_INTERVAL_MS = 300;
+        const MEDIA_RECORDER_CHUNK_MS = 1000;
+        const STATE_FETCH_TIMEOUT_MS = 260;
+        const DOCUMENTED_LOCAL_PERCEPTION_PORT = "8000";
+
+        const els = {
+          button: document.getElementById("start-stop-button"),
+          statusDot: document.getElementById("status-dot"),
+          connectionStatus: document.getElementById("connection-status"),
+          sessionStatus: document.getElementById("session-status"),
+          perceptionStatus: document.getElementById("perception-status"),
+          sessionId: document.getElementById("session-id"),
+          transcript: document.getElementById("transcript"),
+          emptyTranscript: document.getElementById("empty-transcript"),
+          emotionPill: document.getElementById("emotion-pill"),
+          emotionConfidence: document.getElementById("emotion-confidence"),
+          hesitationFill: document.getElementById("hesitation-fill"),
+          hesitationValue: document.getElementById("hesitation-value"),
+          hesitationMeter: document.getElementById("hesitation-meter"),
+          audioEvents: document.getElementById("audio-events"),
+          audioEventCount: document.getElementById("audio-event-count"),
+          rawJson: document.getElementById("raw-perception-json"),
+          liveBadge: document.getElementById("perception-live-badge"),
+        };
+
+        const app = {
+          phase: "idle",
+          session: null,
+          perceptionTargets: null,
+          micStream: null,
+          mediaRecorder: null,
+          perceptionSocket: null,
+          conversation: null,
+          pollTimer: null,
+          pollInFlight: false,
+          pollAbort: null,
+          lastTurn: null,
+          stopping: false,
+        };
+
+        els.button.addEventListener("click", () => {
+          if (app.phase === "idle" || app.phase === "error") {
+            startDemo();
+          } else {
+            stopDemo();
+          }
+        });
+
+        window.addEventListener("beforeunload", () => {
+          void stopDemo({ quiet: true });
+        });
+
+        function setPhase(phase, message) {
+          app.phase = phase;
+          els.statusDot.dataset.state = phase;
+          els.connectionStatus.textContent = message;
+          els.button.disabled = phase === "starting" || phase === "stopping";
+          els.button.textContent = phase === "idle" || phase === "error" ? "Start" : "Stop";
+          els.button.classList.toggle("stop", phase === "connected");
+        }
+
+        function setSessionStatus(message, isError = false) {
+          els.sessionStatus.textContent = message;
+          els.sessionStatus.classList.toggle("status-error", isError);
+        }
+
+        function setPerceptionStatus(message, state = "idle") {
+          els.perceptionStatus.textContent = message;
+          els.liveBadge.textContent = state === "live" ? "Live" : state === "error" ? "Error" : state === "warn" ? "Warn" : "Idle";
+          els.liveBadge.dataset.state = state;
+        }
+
+        async function startDemo() {
+          setPhase("starting", "Starting...");
+          setSessionStatus("Creating a voice-agent session...");
+          setPerceptionStatus("Waiting for perception session.");
+
+          try {
+            clearTranscript();
+            updateRawJson({});
+            resetPerceptionPanel();
+
+            const session = await createVoiceAgentSession();
+            app.session = session;
+
+            const perceptionSessionId = readString(session, ["perception_session_id", "session_id", "id"]);
+            if (!perceptionSessionId) {
+              throw new Error("The server did not return perception_session_id from /session/start.");
+            }
+
+            const agentId = readString(session, ["elevenlabs_agent_id", "agent_id", "elevenlabsAgentId"]);
+            if (!agentId) {
+              throw new Error("The server did not return elevenlabs_agent_id. Set ELEVENLABS_AGENT_ID in .env and restart voice-agent.");
+            }
+
+            els.sessionId.textContent = shortenId(perceptionSessionId);
+            setSessionStatus("Microphone permission requested.");
+
+            const targets = resolvePerceptionTargets(session, perceptionSessionId);
+            app.perceptionTargets = targets;
+            if (targets.warning) {
+              setPerceptionStatus(targets.warning, "warn");
+            }
+
+            app.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            setSessionStatus("Microphone open. Connecting perception audio and ElevenLabs...");
+
+            startPerceptionAudio(app.micStream, targets.audioWsUrl);
+            startPerceptionPolling(targets.stateUrl);
+
+            const Conversation = await loadElevenLabsConversation();
+            const dynamicVariables = { perception_session_id: perceptionSessionId };
+            app.conversation = await Conversation.startSession({
+              agentId,
+              connectionType: "websocket",
+              dynamicVariables,
+              customLlmExtraBody: { perception_session_id: perceptionSessionId },
+              conversation_initiation_client_data: {
+                dynamic_variables: dynamicVariables,
+              },
+              onConnect: (event) => {
+                const conversationId = event && event.conversationId ? event.conversationId : "connected";
+                setPhase("connected", "Connected");
+                setSessionStatus(`ElevenLabs conversation ${conversationId}.`);
+              },
+              onDisconnect: (details) => {
+                if (!app.stopping) {
+                  setPhase("idle", "Disconnected");
+                  setSessionStatus(`Conversation ended: ${describeDisconnect(details)}.`);
+                }
+              },
+              onStatusChange: ({ status } = {}) => {
+                if (!status || app.phase === "stopping" || app.phase === "idle") return;
+                if (status === "connected") {
+                  setPhase("connected", "Connected");
+                } else if (status === "connecting") {
+                  setPhase("starting", "Connecting...");
+                } else if (status === "disconnecting") {
+                  setPhase("stopping", "Disconnecting...");
+                }
+              },
+              onModeChange: ({ mode } = {}) => {
+                if (!mode || app.phase !== "connected") return;
+                setSessionStatus(mode === "speaking" ? "Frau Weber is speaking." : "Listening for your English question.");
+              },
+              onMessage: (payload) => {
+                const text = extractText(payload);
+                if (!text) return;
+                addTurn(normalizeRole(payload), text);
+              },
+              onUserTranscript: (payload) => {
+                const text = extractText(payload);
+                if (text) addTurn("user", text);
+              },
+              onAgentResponse: (payload) => {
+                const text = extractText(payload);
+                if (text) addTurn("clerk", text);
+              },
+              onError: (message, context) => {
+                const detail = formatError(message || context || "Unknown ElevenLabs error");
+                setPhase("error", "ElevenLabs error");
+                setSessionStatus(detail, true);
+              },
+              onPing: (event) => {
+                if (event && typeof event.ping_ms === "number") {
+                  setSessionStatus(`Connected. ElevenLabs ping ${Math.round(event.ping_ms)} ms.`);
+                }
+              },
+            });
+
+            setPhase("connected", "Connected");
+            setSessionStatus("Connected. Ask about recognizing your profession in Germany.");
+          } catch (error) {
+            await stopDemo({ quiet: true });
+            setPhase("error", "Start failed");
+            setSessionStatus(formatError(error), true);
+            setPerceptionStatus("Perception stopped because startup failed.", "error");
+          }
+        }
+
+        async function stopDemo(options = {}) {
+          if (app.phase === "idle" && !app.micStream && !app.conversation && !app.mediaRecorder && !app.perceptionSocket) {
+            return;
+          }
+
+          app.stopping = true;
+          if (!options.quiet) {
+            setPhase("stopping", "Stopping...");
+            setSessionStatus("Closing microphone, perception, and ElevenLabs.");
+          }
+
+          stopPerceptionPolling();
+
+          if (app.mediaRecorder && app.mediaRecorder.state !== "inactive") {
+            try {
+              app.mediaRecorder.stop();
+            } catch (error) {
+              console.warn("Could not stop media recorder", error);
+            }
+          }
+          app.mediaRecorder = null;
+
+          if (app.perceptionSocket) {
+            try {
+              app.perceptionSocket.close(1000, "demo stopped");
+            } catch (error) {
+              console.warn("Could not close perception socket", error);
+            }
+          }
+          app.perceptionSocket = null;
+
+          if (app.micStream) {
+            app.micStream.getTracks().forEach((track) => track.stop());
+          }
+          app.micStream = null;
+
+          if (app.conversation && typeof app.conversation.endSession === "function") {
+            try {
+              await app.conversation.endSession();
+            } catch (error) {
+              console.warn("Could not end ElevenLabs conversation", error);
+            }
+          }
+          app.conversation = null;
+          app.session = null;
+          app.perceptionTargets = null;
+          app.stopping = false;
+
+          if (!options.quiet) {
+            setPhase("idle", "Idle");
+            setSessionStatus("Stopped. Press Start to begin a new session.");
+            setPerceptionStatus("Perception idle.");
+          }
+        }
+
+        async function createVoiceAgentSession() {
+          const response = await fetch("/session/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: "{}",
+          });
+
+          let payload = null;
+          try {
+            payload = await response.json();
+          } catch (error) {
+            throw new Error(`Session start returned invalid JSON with HTTP ${response.status}.`);
+          }
+
+          if (!response.ok) {
+            const detail = payload && (payload.detail || payload.error || payload.message);
+            throw new Error(`Session start failed with HTTP ${response.status}${detail ? `: ${detail}` : ""}.`);
+          }
+
+          return payload;
+        }
+
+        function resolvePerceptionTargets(session, sessionId) {
+          const encodedId = encodeURIComponent(sessionId);
+          const explicitStateUrl = readString(session, [
+            "perception_state_url",
+            "state_url",
+            "perceptionStateUrl",
+            "perception_state_endpoint",
+          ]);
+          const explicitAudioWsUrl = readString(session, [
+            "perception_audio_ws_url",
+            "audio_websocket_url",
+            "voice_perception_audio_ws_url",
+            "perceptionAudioWsUrl",
+            "perception_ws_audio_url",
+          ]);
+          const httpBase = readString(session, [
+            "voice_perception_url",
+            "perception_url",
+            "perception_http_url",
+            "perception_base_url",
+            "perceptionBaseUrl",
+          ]);
+          const wsBase = readString(session, [
+            "voice_perception_ws_url",
+            "perception_ws_url",
+            "perception_websocket_url",
+            "perceptionWsUrl",
+          ]);
+
+          let warning = "";
+          let baseForState = httpBase;
+          let baseForAudio = wsBase || httpBase;
+
+          if (!baseForState && !explicitStateUrl) {
+            const fallback = deriveDocumentedPerceptionFallback();
+            baseForState = fallback.httpBase;
+            baseForAudio = baseForAudio || fallback.wsBase || fallback.httpBase;
+            warning = fallback.warning;
+          }
+
+          const stateUrl = explicitStateUrl
+            ? completeEndpoint(explicitStateUrl, "state", encodedId, false)
+            : joinUrl(baseForState, `/state/${encodedId}`);
+          const audioWsUrl = explicitAudioWsUrl
+            ? completeEndpoint(explicitAudioWsUrl, "audio", encodedId, true)
+            : toWebSocketUrl(joinUrl(baseForAudio, `/audio/${encodedId}`));
+
+          return { stateUrl, audioWsUrl, warning };
+        }
+
+        function deriveDocumentedPerceptionFallback() {
+          const localHosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+          if (localHosts.has(window.location.hostname)) {
+            const localUrl = new URL(window.location.href);
+            localUrl.port = DOCUMENTED_LOCAL_PERCEPTION_PORT;
+            localUrl.pathname = "/";
+            localUrl.search = "";
+            localUrl.hash = "";
+            return {
+              httpBase: localUrl.origin,
+              wsBase: toWebSocketUrl(localUrl.origin),
+              warning: "No perception URL in /session/start. Using documented local perception fallback on port 8000.",
+            };
+          }
+
+          return {
+            httpBase: window.location.origin,
+            wsBase: toWebSocketUrl(window.location.origin),
+            warning: "No perception URL in /session/start. Trying same-origin /state and /audio; configure the backend to return perception URLs if this deployment does not proxy them.",
+          };
+        }
+
+        function completeEndpoint(rawValue, segment, encodedId, wantsWebSocket) {
+          const substitutions = rawValue
+            .replaceAll("{perception_session_id}", encodedId)
+            .replaceAll("{session_id}", encodedId)
+            .replaceAll("{id}", encodedId);
+
+          let absolute;
+          if (substitutions.includes(encodedId)) {
+            absolute = new URL(substitutions, window.location.href).href;
+          } else {
+            const candidate = new URL(substitutions, window.location.href);
+            const cleanPath = candidate.pathname.replace(/\/+$/, "");
+            if (cleanPath.endsWith(`/${segment}`)) {
+              candidate.pathname = `${cleanPath}/${encodedId}`;
+              absolute = candidate.href;
+            } else {
+              absolute = joinUrl(substitutions, `/${segment}/${encodedId}`);
+            }
+          }
+
+          return wantsWebSocket ? toWebSocketUrl(absolute) : absolute;
+        }
+
+        function joinUrl(base, path) {
+          if (!base) {
+            throw new Error("Cannot resolve perception endpoint. /session/start did not provide a perception URL and no fallback could be derived.");
+          }
+          const root = base.endsWith("/") ? base : `${base}/`;
+          return new URL(path.replace(/^\//, ""), root).href;
+        }
+
+        function toWebSocketUrl(value) {
+          const url = new URL(value, window.location.href);
+          if (url.protocol === "https:") url.protocol = "wss:";
+          if (url.protocol === "http:") url.protocol = "ws:";
+          return url.href;
+        }
+
+        function startPerceptionAudio(stream, audioWsUrl) {
+          if (!audioWsUrl) {
+            setPerceptionStatus("Missing perception audio WebSocket URL.", "error");
+            return;
+          }
+          if (window.location.protocol === "https:" && audioWsUrl.startsWith("ws:")) {
+            setPerceptionStatus("Perception audio resolved to ws:// from an HTTPS page. Return a wss:// perception URL or open the demo over HTTP locally.", "error");
+            return;
+          }
+
+          try {
+            const socket = new WebSocket(audioWsUrl);
+            app.perceptionSocket = socket;
+            socket.binaryType = "arraybuffer";
+            setPerceptionStatus("Perception audio connecting...", "warn");
+
+            socket.addEventListener("open", () => {
+              if (app.perceptionSocket !== socket || app.stopping) return;
+              setPerceptionStatus("Perception audio connected. Waiting for state...", "live");
+              startMediaRecorder(stream, socket);
+            });
+
+            socket.addEventListener("error", () => {
+              if (app.perceptionSocket !== socket) return;
+              setPerceptionStatus("Perception audio WebSocket failed. Check voice-perception URL and CORS.", "error");
+            });
+
+            socket.addEventListener("close", (event) => {
+              if (app.perceptionSocket !== socket) return;
+              if (app.phase === "connected" && !app.stopping) {
+                setPerceptionStatus(`Perception audio socket closed (${event.code || "no code"}).`, "warn");
+              }
+            });
+          } catch (error) {
+            setPerceptionStatus(`Could not open perception audio WebSocket: ${formatError(error)}`, "error");
+          }
+        }
+
+        function startMediaRecorder(stream, socket) {
+          if (!window.MediaRecorder) {
+            setPerceptionStatus("MediaRecorder is not available in this browser, so perception audio cannot be streamed.", "error");
+            return;
+          }
+
+          const mimeType = pickSupportedMimeType();
+          try {
+            app.mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+          } catch (error) {
+            setPerceptionStatus(`MediaRecorder failed to start: ${formatError(error)}`, "error");
+            return;
+          }
+
+          app.mediaRecorder.addEventListener("dataavailable", (event) => {
+            if (!event.data || event.data.size === 0) return;
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.send(event.data);
+            }
+          });
+
+          app.mediaRecorder.addEventListener("error", (event) => {
+            setPerceptionStatus(`MediaRecorder error: ${formatError(event.error || event)}`, "error");
+          });
+
+          app.mediaRecorder.start(MEDIA_RECORDER_CHUNK_MS);
+        }
+
+        function pickSupportedMimeType() {
+          const candidates = [
+            "audio/webm;codecs=opus",
+            "audio/webm",
+            "audio/ogg;codecs=opus",
+            "audio/mp4",
+          ];
+          return candidates.find((type) => window.MediaRecorder && MediaRecorder.isTypeSupported(type)) || "";
+        }
+
+        function startPerceptionPolling(stateUrl) {
+          stopPerceptionPolling();
+          pollPerceptionState(stateUrl);
+          app.pollTimer = window.setInterval(() => pollPerceptionState(stateUrl), POLL_INTERVAL_MS);
+        }
+
+        function stopPerceptionPolling() {
+          if (app.pollTimer) {
+            window.clearInterval(app.pollTimer);
+          }
+          app.pollTimer = null;
+          if (app.pollAbort) {
+            app.pollAbort.abort();
+          }
+          app.pollAbort = null;
+          app.pollInFlight = false;
+        }
+
+        async function pollPerceptionState(stateUrl) {
+          if (!stateUrl || app.pollInFlight) return;
+          app.pollInFlight = true;
+          const controller = new AbortController();
+          app.pollAbort = controller;
+          const timeoutId = window.setTimeout(() => controller.abort(), STATE_FETCH_TIMEOUT_MS);
+
+          try {
+            const response = await fetch(stateUrl, {
+              method: "GET",
+              cache: "no-store",
+              signal: controller.signal,
+            });
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}`);
+            }
+            const payload = await response.json();
+            const state = normalizePerceptionPayload(payload);
+            updatePerceptionPanel(state);
+            updateRawJson(payload);
+            if (app.phase === "connected" || app.phase === "starting") {
+              setPerceptionStatus("Perception state live.", "live");
+            }
+          } catch (error) {
+            if (error && error.name === "AbortError") {
+              setPerceptionStatus("Perception state timed out.", "warn");
+            } else {
+              setPerceptionStatus(`Perception state unavailable: ${formatError(error)}`, "error");
+            }
+          } finally {
+            window.clearTimeout(timeoutId);
+            app.pollInFlight = false;
+            if (app.pollAbort === controller) {
+              app.pollAbort = null;
+            }
+          }
+        }
+
+        function normalizePerceptionPayload(payload) {
+          const source = payload && typeof payload === "object" && payload.state && typeof payload.state === "object" ? payload.state : payload || {};
+          const emotionValue = source.emotion && typeof source.emotion === "object" ? source.emotion.label : source.emotion;
+          const confidenceValue = source.emotion && typeof source.emotion === "object" ? source.emotion.confidence : source.emotion_confidence;
+          return {
+            emotion: String(emotionValue || "NEUTRAL").toUpperCase(),
+            confidence: clampNumber(confidenceValue ?? source.confidence ?? 0, 0, 1),
+            hesitation: clampNumber(source.hesitation_score ?? source.hesitation ?? 0, 0, 1),
+            audioEvents: normalizeAudioEvents(source.audio_events ?? source.audioEvents ?? []),
+          };
+        }
+
+        function normalizeAudioEvents(value) {
+          if (Array.isArray(value)) {
+            return value.map((item) => typeof item === "string" ? item : JSON.stringify(item)).filter(Boolean);
+          }
+          if (typeof value === "string" && value.trim()) {
+            return value.split(",").map((item) => item.trim()).filter(Boolean);
+          }
+          if (value && typeof value === "object") {
+            return Object.entries(value)
+              .filter(([, present]) => Boolean(present))
+              .map(([name]) => name);
+          }
+          return [];
+        }
+
+        function updatePerceptionPanel(state) {
+          const emotion = state.emotion || "NEUTRAL";
+          els.emotionPill.textContent = emotion;
+          els.emotionPill.className = `emotion-pill ${emotion.toLowerCase()}`;
+          els.emotionConfidence.textContent = `confidence ${state.confidence.toFixed(2)}`;
+
+          const percent = Math.round(state.hesitation * 100);
+          els.hesitationFill.style.width = `${percent}%`;
+          els.hesitationValue.textContent = `${percent}%`;
+          els.hesitationMeter.value = String(state.hesitation);
+          els.hesitationMeter.textContent = String(state.hesitation);
+
+          els.audioEvents.replaceChildren();
+          els.audioEventCount.textContent = String(state.audioEvents.length);
+          if (state.audioEvents.length === 0) {
+            const empty = document.createElement("span");
+            empty.className = "event-pill empty";
+            empty.textContent = "No events";
+            els.audioEvents.appendChild(empty);
+          } else {
+            state.audioEvents.forEach((eventName) => {
+              const pill = document.createElement("span");
+              pill.className = "event-pill";
+              pill.textContent = eventName;
+              els.audioEvents.appendChild(pill);
+            });
+          }
+        }
+
+        function resetPerceptionPanel() {
+          updatePerceptionPanel({ emotion: "NEUTRAL", confidence: 0, hesitation: 0, audioEvents: [] });
+          setPerceptionStatus("Perception idle.");
+        }
+
+        function updateRawJson(payload) {
+          els.rawJson.textContent = JSON.stringify(payload, null, 2);
+        }
+
+        async function loadElevenLabsConversation() {
+          const existing = findConversationNamespace();
+          if (existing) return existing;
+
+          const fallbackScripts = [
+            "https://cdn.jsdelivr.net/npm/@11labs/client@latest/dist/lib.umd.js",
+            "https://cdn.jsdelivr.net/npm/@elevenlabs/client@latest/dist/lib.iife.js",
+          ];
+
+          for (const src of fallbackScripts) {
+            try {
+              await loadScript(src);
+              const loaded = findConversationNamespace();
+              if (loaded) return loaded;
+            } catch (error) {
+              console.warn(`Could not load ElevenLabs SDK fallback ${src}`, error);
+            }
+          }
+
+          throw new Error("ElevenLabs SDK did not load. Check network access to the CDN and the @11labs/client bundle path.");
+        }
+
+        function findConversationNamespace() {
+          const candidates = [
+            window.ElevenLabsClient,
+            window.ElevenLabs,
+            window.ElevenLabsConvai,
+            window.client,
+            window["@11labs/client"],
+          ];
+
+          for (const candidate of candidates) {
+            if (candidate && candidate.Conversation && typeof candidate.Conversation.startSession === "function") {
+              return candidate.Conversation;
+            }
+            if (candidate && typeof candidate.startSession === "function") {
+              return candidate;
+            }
+          }
+
+          return null;
+        }
+
+        function loadScript(src) {
+          return new Promise((resolve, reject) => {
+            const script = document.createElement("script");
+            script.src = src;
+            script.async = true;
+            script.onload = () => resolve();
+            script.onerror = () => reject(new Error(`Failed to load ${src}`));
+            document.head.appendChild(script);
+          });
+        }
+
+        function addTurn(role, text) {
+          const normalizedRole = role === "user" ? "user" : "clerk";
+          const cleanedText = String(text || "").trim();
+          if (!cleanedText) return;
+
+          const now = Date.now();
+          if (app.lastTurn && app.lastTurn.role === normalizedRole && app.lastTurn.text === cleanedText && now - app.lastTurn.at < 1600) {
+            return;
+          }
+          app.lastTurn = { role: normalizedRole, text: cleanedText, at: now };
+
+          els.emptyTranscript.hidden = true;
+          const item = document.createElement("article");
+          item.className = `turn ${normalizedRole}`;
+
+          const label = document.createElement("div");
+          label.className = "turn-label";
+          label.textContent = `${normalizedRole === "user" ? "User" : "Frau Weber"} ${formatTimestamp(new Date(now))}`;
+
+          const bubble = document.createElement("div");
+          bubble.className = "bubble";
+          bubble.textContent = cleanedText;
+
+          item.append(label, bubble);
+          els.transcript.appendChild(item);
+          item.scrollIntoView({ block: "end", behavior: "smooth" });
+        }
+
+        function clearTranscript() {
+          Array.from(els.transcript.querySelectorAll(".turn")).forEach((node) => node.remove());
+          els.emptyTranscript.hidden = false;
+          app.lastTurn = null;
+        }
+
+        function normalizeRole(payload) {
+          const raw = payload && typeof payload === "object" ? payload.role || payload.source || payload.type : "clerk";
+          const normalized = String(raw || "").toLowerCase();
+          return normalized === "user" ? "user" : "clerk";
+        }
+
+        function extractText(payload) {
+          if (typeof payload === "string") return payload;
+          if (!payload || typeof payload !== "object") return "";
+          const keys = ["message", "text", "transcript", "response", "agent_response", "user_transcript"];
+          for (const key of keys) {
+            if (typeof payload[key] === "string") return payload[key];
+          }
+          if (payload.data && typeof payload.data === "object") return extractText(payload.data);
+          return "";
+        }
+
+        function readString(object, keys) {
+          if (!object || typeof object !== "object") return "";
+          for (const key of keys) {
+            const value = object[key];
+            if (typeof value === "string" && value.trim()) return value.trim();
+          }
+          return "";
+        }
+
+        function clampNumber(value, min, max) {
+          const number = Number(value);
+          if (!Number.isFinite(number)) return min;
+          return Math.min(max, Math.max(min, number));
+        }
+
+        function shortenId(value) {
+          if (!value) return "not started";
+          if (value.length <= 14) return value;
+          return `${value.slice(0, 8)}...${value.slice(-4)}`;
+        }
+
+        function formatTimestamp(date) {
+          return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        }
+
+        function formatError(error) {
+          if (!error) return "Unknown error";
+          if (typeof error === "string") return error;
+          if (error.message) return error.message;
+          try {
+            return JSON.stringify(error);
+          } catch (_) {
+            return String(error);
+          }
+        }
+
+        function describeDisconnect(details) {
+          if (!details) return "unknown reason";
+          if (details.message) return details.message;
+          if (details.reason) return details.reason;
+          return formatError(details);
+        }
+      })();
+    </script>
   </body>
 </html>
