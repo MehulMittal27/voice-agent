@@ -1,6 +1,6 @@
 # voice-agent
 
-Voice Agent service for a live German recognition-office clerk demo using ElevenLabs Conversational AI, Claude, and the companion voice-perception service.
+Voice Agent service for a live German recognition-office clerk demo using ElevenLabs Conversational AI, OpenAI, and the companion voice-perception service.
 
 ## ElevenLabs MCP setup
 
@@ -17,13 +17,13 @@ uvx --version
 
 ### 2. Configure local secrets
 
-Copy the example environment file and add your local keys:
+Copy the example environment file and add your local server-side keys:
 
 ```bash
 cp .env.example .env
 ```
 
-Set `ELEVENLABS_API_KEY` in `.env` from <https://elevenlabs.io/app/settings/api-keys>. Do not paste the key into chat, commit it, or expose it in static/client-side code. The ElevenLabs key is for local/server-side tooling only.
+Set `ELEVENLABS_API_KEY` in `.env` from <https://elevenlabs.io/app/settings/api-keys>. Also set `OPENAI_API_KEY` for the FastAPI Custom LLM webhook and choose `OPENAI_MODEL` if you do not want the default. Do not paste keys into chat, commit them, or expose them in static/client-side code. Keys are for local/server-side tooling only.
 
 ### 3. Use the project MCP config
 
