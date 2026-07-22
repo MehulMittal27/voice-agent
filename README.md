@@ -4,7 +4,7 @@ Voice Agent service for a live German recognition-office clerk demo using Eleven
 
 ## ElevenLabs MCP setup
 
-This repo includes project-level MCP configuration in `.mcp.json` for the official ElevenLabs MCP server (`elevenlabs/elevenlabs-mcp`). It uses `uvx elevenlabs-mcp` so each developer can start the server without committing machine-local MCP setup.
+This repo includes project-level MCP configuration in `.mcp.json` for the official ElevenLabs MCP server (`elevenlabs/elevenlabs-mcp`). The config follows the official `uvx elevenlabs-mcp` pattern from <https://github.com/elevenlabs/elevenlabs-mcp>.
 
 ### 1. Install prerequisites
 
@@ -25,9 +25,11 @@ cp .env.example .env
 
 Set `ELEVENLABS_API_KEY` in `.env` from <https://elevenlabs.io/app/settings/api-keys>. Also set `OPENAI_API_KEY` for the FastAPI Custom LLM webhook and choose `OPENAI_MODEL` if you do not want the default. Do not paste keys into chat, commit them, or expose them in static/client-side code. Keys are for local/server-side tooling only.
 
+The committed `.mcp.json` contains the official placeholder `"<insert-your-api-key-here>"`, not a real key. Replace that placeholder only in your private MCP client config, or use your MCP client's secret/environment-variable support to pass `ELEVENLABS_API_KEY` locally.
+
 ### 3. Use the project MCP config
 
-MCP clients that support project config can load `.mcp.json` directly. The configured server is:
+The official quickstart config is `command: "uvx"`, `args: ["elevenlabs-mcp"]`, and an `env` block containing `ELEVENLABS_API_KEY`. This repo's `.mcp.json` keeps the same shape but uses a placeholder key so secrets stay out of git:
 
 ```json
 {
@@ -36,6 +38,7 @@ MCP clients that support project config can load `.mcp.json` directly. The confi
       "command": "uvx",
       "args": ["elevenlabs-mcp"],
       "env": {
+        "ELEVENLABS_API_KEY": "<insert-your-api-key-here>",
         "ELEVENLABS_MCP_BASE_PATH": ".elevenlabs-mcp-output",
         "ELEVENLABS_MCP_OUTPUT_MODE": "files"
       }
@@ -44,13 +47,20 @@ MCP clients that support project config can load `.mcp.json` directly. The confi
 }
 ```
 
-The committed config intentionally does not include `ELEVENLABS_API_KEY`. Make sure your MCP client loads `.env` or otherwise passes the local `ELEVENLABS_API_KEY` only on your machine. For clients that do not inherit environment variables from the project, copy the server block into your private user-level MCP config and add the key there, keeping that private config untracked.
+Before connecting an MCP client, copy the server block into private client configuration and replace the placeholder with your local key, or configure the client to inject `ELEVENLABS_API_KEY` from a private secret store. Keep that private config untracked.
 
-Generated files are written under `.elevenlabs-mcp-output/`, which is ignored by git.
+Generated files are written under `.elevenlabs-mcp-output/`, which is ignored by git. These optional output settings are documented by the official MCP server.
 
 ### 4. Verify locally
 
 Without using credits, confirm the official MCP package installs and can print a client config with a placeholder key:
+
+```bash
+pip install elevenlabs-mcp
+python -m elevenlabs_mcp --api-key=dummy --print
+```
+
+If you prefer not to install the package globally, this equivalent `uvx` check is also useful:
 
 ```bash
 uvx --from elevenlabs-mcp python -m elevenlabs_mcp --api-key=dummy --print

@@ -297,9 +297,9 @@ const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
 ## ElevenLabs agent creation (via ElevenLabs MCP)
 
-Use the project MCP config in `.mcp.json` with the official `elevenlabs/elevenlabs-mcp` server. See `README.md` for setup, API key handling, and local verification. Never commit `ELEVENLABS_API_KEY` or generated MCP output.
+Use the official `elevenlabs/elevenlabs-mcp` server from <https://github.com/elevenlabs/elevenlabs-mcp>. The project `.mcp.json` follows the official `uvx elevenlabs-mcp` config shape and contains only the placeholder `"<insert-your-api-key-here>"`. See `README.md` for setup, API key handling, and local verification. Never commit `ELEVENLABS_API_KEY` or generated MCP output.
 
-Create or update the Conversational AI agent through the MCP client with these settings:
+Before connecting an MCP client, copy the server block into private client config or use client secret support so `ELEVENLABS_API_KEY` is supplied locally. Then create or update the Conversational AI agent through the MCP client with these settings:
 
 - **Name**: `zollhof-clerk-demo`
 - **Voice**: German-capable, warm, mid-pitch; preview with a short German sentence.
