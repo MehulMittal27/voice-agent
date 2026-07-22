@@ -295,39 +295,48 @@ const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 // stream is shared between ElevenLabs SDK AND voice-perception WebSocket
 ```
 
-## ElevenLabs dashboard configuration (do once tonight)
+## ElevenLabs agent creation (via ElevenLabs MCP)
 
-Log into elevenlabs.io -> **Conversational AI -> Agents -> Create Agent**.
+Use the project MCP config in `.mcp.json` with the official `elevenlabs/elevenlabs-mcp` server. See `README.md` for setup, API key handling, and local verification. Never commit `ELEVENLABS_API_KEY` or generated MCP output.
+
+Create or update the Conversational AI agent through the MCP client with these settings:
 
 - **Name**: `zollhof-clerk-demo`
-- **Voice**: pick a German-capable voice you like. Recommendation: audition
-  3–4 voices tonight with a sample German sentence. Look for warm mid-pitch.
-- **Voice model**: `eleven_flash_v2_5` (low latency, ~75ms first audio)
-- **Language**: `de` for output; enable automatic language detection for input
-  so it accepts English cleanly
-- **First message**: leave empty
-- **System prompt**: a placeholder like "You are Frau Weber." - the real prompt
-  is injected via our webhook every turn
-- **LLM**: `Custom LLM`
-  - **Server URL**: your ngrok HTTPS URL + `/v1/chat/completions`
-  - **Model ID**: any string (we ignore it)
-  - **API Key**: any string (we don't enforce auth tonight; add a TODO)
-- **Dynamic variables** (Advanced -> Variables): add `perception_session_id`
-- **Save** and copy the Agent ID -> paste into `.env` as `ELEVENLABS_AGENT_ID`
+- **Voice**: German-capable, warm, mid-pitch; preview with a short German sentence.
+- **Voice model**: `eleven_flash_v2_5` for low latency.
+- **Language**: German output (`de`); allow English caller input.
+- **First message**: empty.
+- **System prompt**: minimal placeholder such as `You are Frau Weber.`; the FastAPI webhook injects the real OpenAI system prompt each turn.
+- **LLM**: Custom LLM pointing to the public HTTPS webhook URL plus `/v1/chat/completions`.
+- **Custom LLM auth**: placeholder API key is acceptable for local demo unless auth is added server-side.
+- **Dynamic variables**: add `perception_session_id` so ElevenLabs forwards it to the webhook.
+
+After creation, copy the returned agent ID into `.env` as `ELEVENLABS_AGENT_ID`.
 
 ## Environment (`.env.example`)
 ```
+# Server-side ElevenLabs credentials. Required for the official ElevenLabs MCP
+# server and for Conversational AI integration. Never expose this key in
+# static/client-side code.
+ELEVENLABS_API_KEY=xi-your-api-key
+ELEVENLABS_AGENT_ID=agent_your-agent-id
+
+# OpenAI API key used by the FastAPI Custom LLM webhook. Keep server-side only.
 OPENAI_API_KEY=sk-your-openai-api-key
-ELEVENLABS_API_KEY=xi-...
-ELEVENLABS_AGENT_ID=agent_...
+
+# Companion voice-perception service.
 VOICE_PERCEPTION_URL=http://127.0.0.1:8000
-PERCEPTION_LANGUAGE=en          # ISO code of the CALLER's spoken language.
-                                # The clerk's German TTS goes via ElevenLabs,
-                                # not perception, so this is the user's language.
+PERCEPTION_LANGUAGE=en
+
+# Runtime settings.
 OPENAI_MODEL=gpt-4o-mini
 DATA_PROVIDER=mock
 LOG_LEVEL=INFO
 PORT=8001
+
+# Optional official ElevenLabs MCP output settings. Keep generated audio out of git.
+ELEVENLABS_MCP_BASE_PATH=.elevenlabs-mcp-output
+ELEVENLABS_MCP_OUTPUT_MODE=files
 ```
 
 ## ngrok setup (tonight)
@@ -336,13 +345,12 @@ Once the server runs on port 8001:
 ```bash
 ngrok http 8001
 ```
-Copy the HTTPS URL (e.g. `https://abc123.ngrok-free.app`) and paste it into
-the ElevenLabs agent's Custom LLM Server URL field (with `/v1/chat/completions`
-appended).
+Copy the HTTPS URL (e.g. `https://abc123.ngrok-free.app`) and configure the
+ElevenLabs Custom LLM server URL as that URL plus `/v1/chat/completions`.
 
-Free ngrok tunnels expire on restart - expect to update the URL in the
-dashboard tomorrow morning. Consider `cloudflared` for a stable tunnel if
-you want to avoid this.
+Free ngrok tunnels expire on restart - expect to update the Custom LLM URL
+through the ElevenLabs MCP flow after restarting ngrok. Consider `cloudflared`
+for a stable tunnel if you want to avoid this.
 
 ## Testing rules
 
@@ -356,7 +364,7 @@ you want to avoid this.
 **End-to-end test:**
 - Start voice-perception (see its repo README)
 - Start voice-agent on 8001
-- Start ngrok on 8001, paste URL into ElevenLabs dashboard
+- Start ngrok on 8001, then update the ElevenLabs Custom LLM URL via MCP
 - Open the browser UI -> Start -> grant mic -> see perception state updating
 - Speak English -> hear German reply within ~1.5s
 - Speak with clearly anxious tone -> hesitation score rises, clerk softens
