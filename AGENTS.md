@@ -36,10 +36,12 @@ This service depends on the **voice-perception** service.
    OpenAI `/chat/completions` endpoint with Server-Sent Events streaming.
    We call OpenAI upstream and stream its responses in that same format.
 3. **Session correlation** - the browser generates a perception session ID
-   and passes it to ElevenLabs only as a supported dynamic variable. If
-   ElevenLabs does not forward that ID to the Custom LLM webhook, the webhook
-   may fall back to the only active local session for the one-session demo
-   path.
+   and passes it to ElevenLabs only as a supported dynamic variable. The
+   ElevenLabs agent prompt references `{{perception_session_id}}` in a hidden
+   system marker so the Custom LLM webhook can parse it from the system
+   message. If it is still absent, the webhook may fall back to the only active
+   local session or the freshest recently polled local session for the
+   one-session demo path.
 4. **Data layer is mocked tonight, real tomorrow.** All data lookups go
    through a `DataProvider` interface with a `MockDataProvider` implementation.
    Tomorrow, add `RealDataProvider` that hits BIBB / anabin / Integreat.
@@ -132,7 +134,8 @@ some ElevenLabs agents reject them. Send `perception_session_id` as a dynamic
 variable only. Dynamic variables are for agent template expansion and are not
 guaranteed to arrive as raw Custom LLM body fields, so the webhook also handles
 `conversation_initiation_client_data.dynamic_variables`, `elevenlabs_extra_body`,
-generic `extra_body`, and last user message metadata; log which one hit.
+generic `extra_body`, system-message `perception_session_id=<id>` markers, and
+last user message metadata; log which one hit.
 
 Response: SSE stream in OpenAI format:
 ```
@@ -313,7 +316,7 @@ python3 scripts/elevenlabs_agent.py create https://abc123.ngrok-free.app
 python3 scripts/elevenlabs_agent.py update-url https://new-url.ngrok-free.app
 ```
 
-The script configures the demo settings: name `zollhof-clerk-demo`, German output (`de`), empty first message, `eleven_flash_v2_5` TTS, Custom LLM URL `<public-base-url>/v1/chat/completions`, no Custom LLM auth for the unauthenticated local demo webhook, and dynamic variable placeholder `perception_session_id`. The browser sends the same value only through `dynamicVariables`; when ElevenLabs omits it from the webhook, the server uses the single-active-session fallback. After creation or update it prints `ELEVENLABS_AGENT_ID=...` for `.env`.
+The script configures the demo settings: name `zollhof-clerk-demo`, German output (`de`), empty first message, `eleven_flash_v2_5` TTS, Custom LLM URL `<public-base-url>/v1/chat/completions`, no Custom LLM auth for the unauthenticated local demo webhook, dynamic variable placeholder `perception_session_id`, and a hidden prompt marker `perception_session_id={{perception_session_id}}`. The browser sends the same value only through `dynamicVariables`; when ElevenLabs omits it from the webhook, the server uses the single-active-session fallback or freshest recently polled demo-session fallback. After creation or update it prints `ELEVENLABS_AGENT_ID=...` for `.env`.
 
 Optional MCP path: the project `.mcp.json` follows the official `uvx elevenlabs-mcp` config shape and contains only the placeholder `"<insert-your-api-key-here>"`. See `README.md` for setup, API key handling, local verification, and the same agent settings. Never commit `ELEVENLABS_API_KEY` or generated MCP output.
 
@@ -379,9 +382,12 @@ with `scripts/elevenlabs_agent.py update-url` after restarting ngrok. Consider
 ## Known gotchas
 1. **ElevenLabs dynamic variables are not guaranteed Custom LLM body fields.**
    The browser must send `perception_session_id` through `dynamicVariables`
-   only. Log the first webhook body each session to confirm where the ID landed;
-   if it is absent and exactly one local session is active, the webhook uses
-   that session as a demo fallback.
+   only. The direct agent setup script references it in the prompt as
+   `perception_session_id={{perception_session_id}}`, so live agents must be
+   re-provisioned after prompt changes. Log the first webhook body each session
+   to confirm where the ID landed; if it is absent, the webhook uses the only
+   active local session or the freshest recently polled local session as a demo
+   fallback.
 2. **Perception client timeout matters.** If voice-perception is slow, don't
    block the whole webhook. 100ms timeout, fall back to defaults, log a warning.
 3. **SSE requires specific headers.** `Content-Type: text/event-stream`,

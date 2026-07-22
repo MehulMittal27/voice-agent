@@ -21,6 +21,11 @@ API_BASE_URL = "https://api.elevenlabs.io/v1"
 DEFAULT_AGENT_NAME = "zollhof-clerk-demo"
 DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"  # George, multilingual and warm for demos.
 DEFAULT_TTS_MODEL = "eleven_flash_v2_5"
+AGENT_PROMPT = (
+    "You are Frau Weber.\n\n"
+    "System reference (never read aloud): "
+    "perception_session_id={{perception_session_id}}"
+)
 
 PLACEHOLDER_PREFIXES = (
     "xi-your",
@@ -94,7 +99,7 @@ def build_agent_payload(
                     }
                 },
                 "prompt": {
-                    "prompt": "You are Frau Weber.",
+                    "prompt": AGENT_PROMPT,
                     "llm": "custom-llm",
                     "custom_llm": {
                         "url": custom_llm_url,

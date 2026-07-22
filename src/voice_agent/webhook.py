@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import re
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Any
 
@@ -14,7 +15,11 @@ from fastapi.responses import StreamingResponse
 from voice_agent import clerk
 from voice_agent.logging_config import REDACTION_TEXT, redact_secrets
 from voice_agent.perception_client import PerceptionClient, neutral_state
-from voice_agent.session import SessionInfo, session_store
+from voice_agent.session import (
+    DEMO_SESSION_FALLBACK_MAX_AGE,
+    SessionInfo,
+    session_store,
+)
 from voice_agent.streaming import openai_to_openai_sse
 
 logger = logging.getLogger(__name__)
@@ -55,6 +60,10 @@ _SECRET_KEY_PARTS = (
     "token",
     "x-api-key",
     "xi-api-key",
+)
+_SYSTEM_MESSAGE_SESSION_ID_RE = re.compile(
+    r"\bperception_session_id\s*[:=]\s*([^\s,;\"'`<>{}]+)",
+    re.IGNORECASE,
 )
 
 
@@ -147,6 +156,12 @@ def extract_perception_session_id(body: Mapping[str, Any]) -> tuple[str | None, 
         if container_value is not None:
             return container_value, container_source
 
+    system_message_value, system_message_source = _session_id_from_system_messages(
+        body.get("messages")
+    )
+    if system_message_value is not None:
+        return system_message_value, system_message_source
+
     last_user_metadata = _last_user_message_metadata(body.get("messages"))
     if last_user_metadata is not None:
         metadata_value, metadata_source = _session_id_from_mapping_with_source(
@@ -168,17 +183,32 @@ def _resolve_perception_session_id(body: Mapping[str, Any]) -> tuple[str | None,
     if fallback_session is not None:
         logger.warning(
             "No perception_session_id in webhook body; using only active local "
-            "session %s as demo fallback",
+            "session %s with perception session %s as demo fallback",
             fallback_session.conversation_id,
+            fallback_session.perception_session_id,
         )
         return fallback_session.perception_session_id, "single active local session fallback"
 
     active_count = session_store.active_count()
     if active_count > 1:
+        fallback_session = session_store.get_latest_active(
+            max_age=DEMO_SESSION_FALLBACK_MAX_AGE,
+        )
+        if fallback_session is not None:
+            logger.warning(
+                "No perception_session_id in webhook body; using latest active "
+                "demo session %s",
+                fallback_session.perception_session_id,
+            )
+            return (
+                fallback_session.perception_session_id,
+                "latest active demo session fallback",
+            )
         logger.warning(
-            "No perception_session_id in webhook body and %d active local sessions; "
-            "not guessing",
+            "No perception_session_id in webhook body and %d active local sessions, "
+            "but none touched in the last %.0f seconds; not guessing",
             active_count,
+            DEMO_SESSION_FALLBACK_MAX_AGE.total_seconds(),
         )
     return None, "missing"
 
@@ -209,6 +239,52 @@ def _session_id_from_mapping_with_source(
                 return value, f"{prefix}.{key}"
 
     return None, "missing"
+
+
+def _session_id_from_system_messages(raw_messages: Any) -> tuple[str | None, str]:
+    if not isinstance(raw_messages, Sequence) or isinstance(
+        raw_messages,
+        (str, bytes, bytearray),
+    ):
+        return None, "missing"
+
+    for index, message in enumerate(raw_messages):
+        if not isinstance(message, Mapping):
+            continue
+        if str(message.get("role", "")).strip().lower() != "system":
+            continue
+        content_text = _message_content_to_text(message.get("content"))
+        match = _SYSTEM_MESSAGE_SESSION_ID_RE.search(content_text)
+        if match is None:
+            continue
+        value = match.group(1).strip().rstrip(".)]")
+        if value:
+            return value, f"messages[{index}].system content perception_session_id marker"
+    return None, "missing"
+
+
+def _message_content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, Sequence) or isinstance(
+        content,
+        (str, bytes, bytearray),
+    ):
+        return ""
+
+    parts: list[str] = []
+    for item in content:
+        if isinstance(item, str):
+            parts.append(item)
+            continue
+        if not isinstance(item, Mapping):
+            continue
+        for key in ("text", "content"):
+            value = item.get(key)
+            if isinstance(value, str) and value:
+                parts.append(value)
+                break
+    return "\n".join(parts)
 
 
 def _last_user_message_metadata(raw_messages: Any) -> Mapping[str, Any] | None:
