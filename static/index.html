@@ -639,8 +639,8 @@
             }
 
             const agentId = readString(session, ["elevenlabs_agent_id", "agent_id", "elevenlabsAgentId"]);
-            if (!agentId) {
-              throw new Error("The server did not return elevenlabs_agent_id. Set ELEVENLABS_AGENT_ID in .env and restart voice-agent.");
+            if (isMissingAgentId(agentId)) {
+              throw new Error("The server did not return a real elevenlabs_agent_id. Create or update the ElevenLabs agent, set ELEVENLABS_AGENT_ID in .env, and restart voice-agent.");
             }
 
             els.sessionId.textContent = shortenId(perceptionSessionId);
@@ -1224,6 +1224,11 @@
             if (typeof value === "string" && value.trim()) return value.trim();
           }
           return "";
+        }
+
+        function isMissingAgentId(value) {
+          const normalized = String(value || "").trim().toLowerCase();
+          return !normalized || normalized === "agent_your-agent-id" || normalized.startsWith("agent_your");
         }
 
         function clampNumber(value, min, max) {

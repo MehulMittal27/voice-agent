@@ -98,12 +98,24 @@ class Settings:
         }
 
 
-def _env_str(name: str, default: str = "") -> str:
+def _env_str(
+    name: str,
+    default: str = "",
+    *,
+    placeholder_values: tuple[str, ...] = (),
+    placeholder_prefixes: tuple[str, ...] = (),
+) -> str:
     value = os.environ.get(name)
     if value is None:
         return default
     stripped = value.strip()
-    return stripped if stripped else default
+    if not stripped:
+        return default
+    if stripped in placeholder_values or any(
+        stripped.startswith(prefix) for prefix in placeholder_prefixes
+    ):
+        return default
+    return stripped
 
 
 def _env_int(name: str, default: int) -> int:
@@ -127,9 +139,21 @@ def load_settings(dotenv_path: str | Path | None = None) -> Settings:
         load_dotenv(dotenv_path=dotenv_path, override=False)
 
     return Settings(
-        openai_api_key=_env_str("OPENAI_API_KEY"),
-        elevenlabs_api_key=_env_str("ELEVENLABS_API_KEY"),
-        elevenlabs_agent_id=_env_str("ELEVENLABS_AGENT_ID"),
+        openai_api_key=_env_str(
+            "OPENAI_API_KEY",
+            placeholder_values=("sk-your-openai-api-key",),
+            placeholder_prefixes=("sk-your-",),
+        ),
+        elevenlabs_api_key=_env_str(
+            "ELEVENLABS_API_KEY",
+            placeholder_values=("xi-your-api-key",),
+            placeholder_prefixes=("xi-your-",),
+        ),
+        elevenlabs_agent_id=_env_str(
+            "ELEVENLABS_AGENT_ID",
+            placeholder_values=("agent_your-agent-id",),
+            placeholder_prefixes=("agent_your",),
+        ),
         voice_perception_url=_env_str(
             "VOICE_PERCEPTION_URL",
             DEFAULT_VOICE_PERCEPTION_URL,
