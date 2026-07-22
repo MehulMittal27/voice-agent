@@ -304,7 +304,7 @@ python3 scripts/elevenlabs_agent.py create https://abc123.ngrok-free.app
 python3 scripts/elevenlabs_agent.py update-url https://new-url.ngrok-free.app
 ```
 
-The script configures the demo settings: name `zollhof-clerk-demo`, German output (`de`), empty first message, `eleven_flash_v2_5` TTS, Custom LLM URL `<public-base-url>/v1/chat/completions`, placeholder Custom LLM auth for the local demo, and dynamic variable placeholder `perception_session_id`. After creation or update it prints `ELEVENLABS_AGENT_ID=...` for `.env`.
+The script configures the demo settings: name `zollhof-clerk-demo`, German output (`de`), empty first message, `eleven_flash_v2_5` TTS, Custom LLM URL `<public-base-url>/v1/chat/completions`, no Custom LLM auth for the unauthenticated local demo webhook, and dynamic variable placeholder `perception_session_id`. After creation or update it prints `ELEVENLABS_AGENT_ID=...` for `.env`.
 
 Optional MCP path: the project `.mcp.json` follows the official `uvx elevenlabs-mcp` config shape and contains only the placeholder `"<insert-your-api-key-here>"`. See `README.md` for setup, API key handling, local verification, and the same agent settings. Never commit `ELEVENLABS_API_KEY` or generated MCP output.
 

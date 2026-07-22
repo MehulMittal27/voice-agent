@@ -21,7 +21,6 @@ API_BASE_URL = "https://api.elevenlabs.io/v1"
 DEFAULT_AGENT_NAME = "zollhof-clerk-demo"
 DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"  # George, multilingual and warm for demos.
 DEFAULT_TTS_MODEL = "eleven_flash_v2_5"
-DEFAULT_LLM_AUTH_TOKEN = "local-demo-placeholder"
 
 PLACEHOLDER_PREFIXES = (
     "xi-your",
@@ -101,7 +100,6 @@ def build_agent_payload(
                         "url": custom_llm_url,
                         "model_id": "custom",
                         "api_type": "chat_completions",
-                        "api_key": DEFAULT_LLM_AUTH_TOKEN,
                     },
                 },
             },

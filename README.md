@@ -79,7 +79,7 @@ If you already have an `ELEVENLABS_AGENT_ID` in `.env`, update the existing agen
 python3 scripts/elevenlabs_agent.py update-url https://abc123.ngrok-free.app
 ```
 
-The script configures the Conversational AI agent with German output, `eleven_flash_v2_5` TTS, the Custom LLM URL `<ngrok-url>/v1/chat/completions`, and the `perception_session_id` dynamic variable. It reads `ELEVENLABS_API_KEY` from `.env` or the environment and never prints the key.
+The script configures the Conversational AI agent with German output, `eleven_flash_v2_5` TTS, the Custom LLM URL `<ngrok-url>/v1/chat/completions`, no Custom LLM auth for the unauthenticated local demo webhook, and the `perception_session_id` dynamic variable. It reads `ELEVENLABS_API_KEY` from `.env` or the environment and never prints the key.
 
 ### 7. Save the agent ID and restart
 
