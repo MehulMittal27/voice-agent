@@ -15,6 +15,7 @@ Run commands from the repo root.
 - The companion `voice-perception` service cloned and running separately: <https://github.com/mehulmittal27/voice-perception>
 
 By default this app expects `voice-perception` at `http://127.0.0.1:8000`.
+The browser demo uses same-origin voice-agent proxy endpoints for perception state and audio, so the standard UI path does not require browser CORS on `voice-perception`. If you bypass those proxy endpoints and call `voice-perception` directly from a browser, the companion service must be running and CORS-enabled for that origin.
 
 ### 1. Configure `.env`
 

@@ -123,8 +123,9 @@ Request body (ElevenLabs sends this):
 }
 ```
 `perception_session_id` may arrive as a top-level field, inside `extra_body`,
-or inside the last user message's metadata depending on ElevenLabs SDK version.
-Handle all three; log which one hit.
+under `conversation_initiation_client_data.dynamic_variables`, or inside the
+last user message's metadata depending on ElevenLabs SDK version. Handle all
+placements; log which one hit.
 
 Response: SSE stream in OpenAI format:
 ```
@@ -281,8 +282,9 @@ call; they should hear the resulting answer.
 1. Browser: `POST /session/start` on voice-agent -> receives `perception_session_id`
 2. Browser: initialises ElevenLabs SDK, passing `perception_session_id` inside
    `conversation_initiation_client_data.dynamic_variables`
-3. Browser: also opens the audio WebSocket to voice-perception with the same
-   `perception_session_id` - mic audio streams there for analysis
+3. Browser: opens the same-origin `/perception/audio/{perception_session_id}`
+   proxy with the same `perception_session_id` - voice-agent forwards mic audio
+   to voice-perception for analysis
 4. User speaks -> ElevenLabs STT + turn detection -> ElevenLabs calls our webhook
    with the messages and the dynamic variable
 5. Webhook extracts `perception_session_id`, fetches state, calls OpenAI,
@@ -379,8 +381,10 @@ with `scripts/elevenlabs_agent.py update-url` after restarting ngrok. Consider
    tonight, execute tools BEFORE the final text stream (non-streaming call to
    resolve tool use, then a second streaming call for the verbal response).
    This is simpler and reliable. Optimise later.
-5. **CORS for local dev.** Enable CORS on the FastAPI app allowing the ngrok
-   URL, since the browser will call both voice-perception and voice-agent.
+5. **Perception browser path.** The standard UI calls voice-agent's
+   same-origin `/perception/state/{id}` and `/perception/audio/{id}` proxy
+   routes. If you bypass them and call voice-perception directly from the
+   browser, voice-perception must be running and CORS-enabled for that origin.
 6. **Perception language routing.** voice-perception picks its transcript
    engine per session based on the `language` sent at `/session/start`.
    `de` -> faster-whisper base (best German ASR). Other codes -> SenseVoice's
