@@ -212,6 +212,7 @@ def _session_start_payload(
     perception_state_url = f"/perception/state/{encoded_session_id}"
     perception_audio_ws_url = f"/perception/audio/{encoded_session_id}"
 
+    fallback_enabled = _perception_session_fallback_enabled(session)
     payload: dict[str, Any] = {
         "conversation_id": session.conversation_id,
         "perception_session_id": perception_session_id,
@@ -222,10 +223,24 @@ def _session_start_payload(
         "perception_audio_ws_url": perception_audio_ws_url,
         "perception_reachable": perception_reachable,
         "perception_language": settings.perception_language,
+        "perception_correlation_mode": (
+            "dynamic_variable_with_server_fallback"
+            if fallback_enabled
+            else "dynamic_variable_only"
+        ),
+        "perception_fallback_enabled": fallback_enabled,
     }
     if warning is not None:
         payload["warning"] = warning
     return payload
+
+
+def _perception_session_fallback_enabled(session: SessionInfo) -> bool:
+    fallback_session = session_store.get_unambiguous_active(touch=False)
+    return (
+        fallback_session is not None
+        and fallback_session.conversation_id == session.conversation_id
+    )
 
 
 def _to_websocket_url(url: str) -> str:
