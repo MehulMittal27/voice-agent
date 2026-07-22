@@ -2,21 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 from uuid import uuid4
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from voice_agent.config import Settings, get_settings
 from voice_agent.logging_config import configure_logging
-from voice_agent.perception_client import PerceptionClient, PerceptionClientError
+from voice_agent.perception_client import (
+    PerceptionClient,
+    PerceptionClientError,
+    neutral_state,
+)
 from voice_agent.session import SessionInfo, session_store
 from voice_agent.webhook import router as webhook_router
 
@@ -121,12 +126,52 @@ def _register_routes(app: FastAPI) -> None:
             "openai_model": settings.openai_model,
         }
 
+    @app.get("/perception/state/{perception_session_id}")
+    async def perception_state(
+        perception_session_id: str,
+        request: Request,
+    ) -> dict[str, Any]:
+        state = await _maybe_await(
+            _perception_client(request).get_state(perception_session_id)
+        )
+        if not isinstance(state, dict):
+            logger.warning(
+                "Perception state proxy returned non-object state for session %s",
+                perception_session_id,
+            )
+            state = neutral_state()
+        return {"state": state}
+
+    @app.websocket("/perception/audio/{perception_session_id}")
+    async def perception_audio(
+        perception_session_id: str,
+        websocket: WebSocket,
+    ) -> None:
+        await websocket.accept()
+        target_url = _perception_audio_url(
+            _settings(websocket).voice_perception_url,
+            perception_session_id,
+        )
+        try:
+            await _proxy_audio_websocket(websocket, target_url)
+        except Exception as exc:
+            logger.warning(
+                "Perception audio proxy failed for session %s: %s",
+                perception_session_id,
+                exc,
+            )
+            with suppress(Exception):
+                await websocket.close(
+                    code=1011,
+                    reason="Perception audio proxy failed",
+                )
+
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
         return FileResponse(STATIC_INDEX_PATH)
 
 
-def _settings(request: Request) -> Settings:
+def _settings(request: Request | WebSocket) -> Settings:
     settings = getattr(request.app.state, "settings", None)
     if isinstance(settings, Settings):
         return settings
@@ -164,10 +209,8 @@ def _session_start_payload(
     perception_session_id = session.perception_session_id
     encoded_session_id = quote(perception_session_id, safe="")
     perception_base_url = settings.voice_perception_url.rstrip("/")
-    perception_state_url = f"{perception_base_url}/state/{encoded_session_id}"
-    perception_audio_ws_url = _to_websocket_url(
-        f"{perception_base_url}/audio/{encoded_session_id}"
-    )
+    perception_state_url = f"/perception/state/{encoded_session_id}"
+    perception_audio_ws_url = f"/perception/audio/{encoded_session_id}"
 
     payload: dict[str, Any] = {
         "conversation_id": session.conversation_id,
@@ -191,6 +234,67 @@ def _to_websocket_url(url: str) -> str:
     if url.startswith("http://"):
         return f"ws://{url[len('http://') :]}"
     return url
+
+
+def _perception_audio_url(base_url: str, perception_session_id: str) -> str:
+    encoded_session_id = quote(perception_session_id, safe="")
+    return _to_websocket_url(f"{base_url.rstrip('/')}/audio/{encoded_session_id}")
+
+
+async def _proxy_audio_websocket(websocket: WebSocket, target_url: str) -> None:
+    # uvicorn[standard] provides websockets in normal installs.
+    try:
+        import websockets
+    except ModuleNotFoundError as exc:  # pragma: no cover
+        raise RuntimeError("websockets package is required for audio proxying") from exc
+
+    async with websockets.connect(target_url) as upstream:
+        client_task = asyncio.create_task(
+            _client_audio_to_upstream(websocket, upstream)
+        )
+        upstream_task = asyncio.create_task(
+            _upstream_audio_to_client(websocket, upstream)
+        )
+        done, pending = await asyncio.wait(
+            {client_task, upstream_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        for task in pending:
+            task.cancel()
+        for task in pending:
+            with suppress(asyncio.CancelledError):
+                await task
+        for task in done:
+            task.result()
+
+
+async def _client_audio_to_upstream(websocket: WebSocket, upstream: Any) -> None:
+    try:
+        while True:
+            message = await websocket.receive()
+            message_type = message.get("type")
+            if message_type == "websocket.disconnect":
+                return
+
+            data = message.get("bytes")
+            if data is not None:
+                await upstream.send(data)
+                continue
+
+            text = message.get("text")
+            if text is not None:
+                await upstream.send(text)
+    except WebSocketDisconnect:
+        return
+
+
+async def _upstream_audio_to_client(websocket: WebSocket, upstream: Any) -> None:
+    async for message in upstream:
+        if isinstance(message, bytes):
+            await websocket.send_bytes(message)
+        else:
+            await websocket.send_text(str(message))
 
 
 async def _perception_reachable(client: PerceptionClient) -> bool:

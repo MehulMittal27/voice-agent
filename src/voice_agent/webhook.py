@@ -34,6 +34,11 @@ _SESSION_ID_KEYS = (
     "voice_perception_session_id",
     "voicePerceptionSessionId",
 )
+_DYNAMIC_VARIABLE_CONTAINER_KEYS = (
+    "conversation_initiation_client_data",
+    "conversationInitiationClientData",
+    "conversation_initiation_clientData",
+)
 _SECRET_KEY_PARTS = (
     "api_key",
     "apikey",
@@ -123,6 +128,17 @@ def extract_perception_session_id(body: Mapping[str, Any]) -> tuple[str | None, 
         )
         if extra_value is not None:
             return extra_value, extra_source
+
+    for container_key in _DYNAMIC_VARIABLE_CONTAINER_KEYS:
+        container = _as_mapping(body.get(container_key))
+        if container is None:
+            continue
+        container_value, container_source = _session_id_from_mapping_with_source(
+            container,
+            container_key,
+        )
+        if container_value is not None:
+            return container_value, container_source
 
     last_user_metadata = _last_user_message_metadata(body.get("messages"))
     if last_user_metadata is not None:

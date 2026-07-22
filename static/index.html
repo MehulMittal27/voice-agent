@@ -551,7 +551,6 @@
         const POLL_INTERVAL_MS = 300;
         const MEDIA_RECORDER_CHUNK_MS = 1000;
         const STATE_FETCH_TIMEOUT_MS = 260;
-        const DOCUMENTED_LOCAL_PERCEPTION_PORT = "8000";
 
         const els = {
           button: document.getElementById("start-stop-button"),
@@ -577,6 +576,7 @@
           phase: "idle",
           session: null,
           perceptionTargets: null,
+          perceptionReachable: true,
           micStream: null,
           mediaRecorder: null,
           perceptionSocket: null,
@@ -648,15 +648,33 @@
 
             const targets = resolvePerceptionTargets(session, perceptionSessionId);
             app.perceptionTargets = targets;
-            if (targets.warning) {
+            app.perceptionReachable = session.perception_reachable !== false;
+            const sessionWarning = readString(session, ["warning"]);
+            if (sessionWarning) {
+              setPerceptionStatus(sessionWarning, "warn");
+            } else if (targets.warning) {
               setPerceptionStatus(targets.warning, "warn");
             }
 
             app.micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
             setSessionStatus("Microphone open. Connecting perception audio and ElevenLabs...");
 
-            startPerceptionAudio(app.micStream, targets.audioWsUrl);
-            startPerceptionPolling(targets.stateUrl);
+            if (app.perceptionReachable) {
+              startPerceptionAudio(app.micStream, targets.audioWsUrl);
+              startPerceptionPolling(targets.stateUrl);
+            } else {
+              updateRawJson({
+                warning: sessionWarning || "Perception service unavailable.",
+                state: {
+                  emotion: "NEUTRAL",
+                  emotion_confidence: 0,
+                  stability: "stable",
+                  audio_events: [],
+                  hesitation_score: 0,
+                },
+              });
+              setPerceptionStatus(sessionWarning || "Perception service unavailable. Showing neutral fallback state.", "warn");
+            }
 
             const Conversation = await loadElevenLabsConversation();
             const dynamicVariables = { perception_session_id: perceptionSessionId };
@@ -664,7 +682,6 @@
               agentId,
               connectionType: "websocket",
               dynamicVariables,
-              customLlmExtraBody: { perception_session_id: perceptionSessionId },
               conversation_initiation_client_data: {
                 dynamic_variables: dynamicVariables,
               },
@@ -774,6 +791,7 @@
           app.conversation = null;
           app.session = null;
           app.perceptionTargets = null;
+          app.perceptionReachable = true;
           app.stopping = false;
 
           if (!options.quiet) {
@@ -856,24 +874,11 @@
         }
 
         function deriveDocumentedPerceptionFallback() {
-          const localHosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
-          if (localHosts.has(window.location.hostname)) {
-            const localUrl = new URL(window.location.href);
-            localUrl.port = DOCUMENTED_LOCAL_PERCEPTION_PORT;
-            localUrl.pathname = "/";
-            localUrl.search = "";
-            localUrl.hash = "";
-            return {
-              httpBase: localUrl.origin,
-              wsBase: toWebSocketUrl(localUrl.origin),
-              warning: "No perception URL in /session/start. Using documented local perception fallback on port 8000.",
-            };
-          }
-
+          const proxyBase = new URL("/perception/", window.location.href).href;
           return {
-            httpBase: window.location.origin,
-            wsBase: toWebSocketUrl(window.location.origin),
-            warning: "No perception URL in /session/start. Trying same-origin /state and /audio; configure the backend to return perception URLs if this deployment does not proxy them.",
+            httpBase: proxyBase,
+            wsBase: toWebSocketUrl(proxyBase),
+            warning: "No perception URL in /session/start. Using the same-origin perception proxy; voice-perception must still run at the backend VOICE_PERCEPTION_URL.",
           };
         }
 
@@ -939,7 +944,7 @@
 
             socket.addEventListener("error", () => {
               if (app.perceptionSocket !== socket) return;
-              setPerceptionStatus("Perception audio WebSocket failed. Check voice-perception URL and CORS.", "error");
+              setPerceptionStatus("Perception audio WebSocket failed. Check that voice-perception is running and reachable from voice-agent.", "error");
             });
 
             socket.addEventListener("close", (event) => {
@@ -1029,7 +1034,9 @@
             const state = normalizePerceptionPayload(payload);
             updatePerceptionPanel(state);
             updateRawJson(payload);
-            if (app.phase === "connected" || app.phase === "starting") {
+            if (app.session && app.session.perception_reachable === false) {
+              setPerceptionStatus("Perception service unavailable. Showing neutral fallback state.", "warn");
+            } else if (app.phase === "connected" || app.phase === "starting") {
               setPerceptionStatus("Perception state live.", "live");
             }
           } catch (error) {
