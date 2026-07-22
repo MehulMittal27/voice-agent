@@ -1,1 +1,272 @@
-"""In-memory session store placeholder for later waves."""
+"""In-memory session tracking for the voice-agent demo."""
+
+from __future__ import annotations
+
+from copy import deepcopy
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from threading import RLock
+from typing import Any, Callable, Iterable, Mapping, Union
+from uuid import UUID, uuid4
+
+DEFAULT_SESSION_TTL = timedelta(minutes=30)
+
+ConversationId = Union[str, UUID]
+SessionMessage = dict[str, Any]
+
+
+@dataclass
+class SessionInfo:
+    """State kept for one local voice-agent conversation."""
+
+    conversation_id: str
+    perception_session_id: str
+    created_at: datetime
+    last_seen: datetime
+    message_history: list[SessionMessage] = field(default_factory=list)
+
+    def touch(self, when: datetime | None = None) -> None:
+        """Mark the session as active at ``when`` or now."""
+        self.last_seen = _coerce_utc(when or _utc_now())
+
+    def is_expired(
+        self,
+        *,
+        now: datetime | None = None,
+        expire_after: timedelta = DEFAULT_SESSION_TTL,
+    ) -> bool:
+        """Return true if the session has been inactive past ``expire_after``."""
+        return _coerce_utc(now or _utc_now()) - self.last_seen >= expire_after
+
+
+class SessionStore:
+    """Small, process-local session store for a single FastAPI worker."""
+
+    def __init__(
+        self,
+        *,
+        expire_after: timedelta = DEFAULT_SESSION_TTL,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        if expire_after < timedelta(0):
+            raise ValueError("expire_after must not be negative")
+        self._expire_after = expire_after
+        self._clock = clock or _utc_now
+        self._lock = RLock()
+        self._sessions: dict[str, SessionInfo] = {}
+
+    @property
+    def expire_after(self) -> timedelta:
+        """Inactivity window before a session expires."""
+        return self._expire_after
+
+    def create(
+        self,
+        perception_session_id: str,
+        *,
+        conversation_id: ConversationId | None = None,
+        message_history: Iterable[Mapping[str, Any]] | None = None,
+    ) -> SessionInfo:
+        """Create and store a session keyed by a local conversation UUID."""
+        if not perception_session_id.strip():
+            raise ValueError("perception_session_id must not be empty")
+
+        resolved_conversation_id = (
+            str(uuid4())
+            if conversation_id is None
+            else _normalize_conversation_id(conversation_id)
+        )
+        now = self._now()
+        session = SessionInfo(
+            conversation_id=resolved_conversation_id,
+            perception_session_id=perception_session_id.strip(),
+            created_at=now,
+            last_seen=now,
+            message_history=_copy_messages(
+                () if message_history is None else message_history
+            ),
+        )
+
+        with self._lock:
+            self.cleanup_expired(now=now)
+            if resolved_conversation_id in self._sessions:
+                raise ValueError(
+                    f"session already exists for conversation_id "
+                    f"{resolved_conversation_id}"
+                )
+            self._sessions[resolved_conversation_id] = session
+            return session
+
+    def get(
+        self,
+        conversation_id: ConversationId,
+        *,
+        touch: bool = True,
+    ) -> SessionInfo | None:
+        """Return an active session by conversation ID, or None if missing."""
+        now = self._now()
+        with self._lock:
+            session = self._get_active_locked(conversation_id, now=now)
+            if session is not None and touch:
+                session.touch(now)
+            return session
+
+    def touch(self, conversation_id: ConversationId) -> SessionInfo | None:
+        """Refresh ``last_seen`` for an active session."""
+        now = self._now()
+        with self._lock:
+            session = self._get_active_locked(conversation_id, now=now)
+            if session is None:
+                return None
+            session.touch(now)
+            return session
+
+    def add_message(
+        self,
+        conversation_id: ConversationId,
+        message: Mapping[str, Any],
+    ) -> SessionInfo | None:
+        """Append one chat message and refresh the session activity time."""
+        now = self._now()
+        with self._lock:
+            session = self._get_active_locked(conversation_id, now=now)
+            if session is None:
+                return None
+            session.message_history.append(deepcopy(dict(message)))
+            session.touch(now)
+            return session
+
+    def extend_history(
+        self,
+        conversation_id: ConversationId,
+        messages: Iterable[Mapping[str, Any]],
+    ) -> SessionInfo | None:
+        """Append multiple chat messages and refresh the session activity time."""
+        now = self._now()
+        with self._lock:
+            session = self._get_active_locked(conversation_id, now=now)
+            if session is None:
+                return None
+            session.message_history.extend(_copy_messages(messages))
+            session.touch(now)
+            return session
+
+    def update_history(
+        self,
+        conversation_id: ConversationId,
+        message_history: Iterable[Mapping[str, Any]],
+    ) -> SessionInfo | None:
+        """Replace the stored chat history and refresh the session activity time."""
+        now = self._now()
+        with self._lock:
+            session = self._get_active_locked(conversation_id, now=now)
+            if session is None:
+                return None
+            session.message_history = _copy_messages(message_history)
+            session.touch(now)
+            return session
+
+    def find_by_perception_id(
+        self,
+        perception_session_id: str,
+        *,
+        touch: bool = True,
+    ) -> SessionInfo | None:
+        """Find the active local session associated with a perception session."""
+        if not perception_session_id.strip():
+            return None
+
+        now = self._now()
+        with self._lock:
+            self.cleanup_expired(now=now)
+            for session in self._sessions.values():
+                if session.perception_session_id == perception_session_id.strip():
+                    if touch:
+                        session.touch(now)
+                    return session
+            return None
+
+    def end(self, conversation_id: ConversationId) -> SessionInfo | None:
+        """Remove a session and return it if it existed."""
+        try:
+            normalized_id = _normalize_conversation_id(conversation_id)
+        except ValueError:
+            return None
+        with self._lock:
+            return self._sessions.pop(normalized_id, None)
+
+    def delete(self, conversation_id: ConversationId) -> bool:
+        """Remove a session and report whether anything was deleted."""
+        return self.end(conversation_id) is not None
+
+    def cleanup_expired(self, *, now: datetime | None = None) -> int:
+        """Delete expired sessions and return the number removed."""
+        resolved_now = _coerce_utc(now or self._now())
+        with self._lock:
+            expired_ids = [
+                conversation_id
+                for conversation_id, session in self._sessions.items()
+                if session.is_expired(
+                    now=resolved_now,
+                    expire_after=self._expire_after,
+                )
+            ]
+            for conversation_id in expired_ids:
+                del self._sessions[conversation_id]
+            return len(expired_ids)
+
+    def active_count(self) -> int:
+        """Return the number of currently active sessions after cleanup."""
+        with self._lock:
+            self.cleanup_expired()
+            return len(self._sessions)
+
+    def clear(self) -> None:
+        """Remove all sessions. Intended for tests and local demos."""
+        with self._lock:
+            self._sessions.clear()
+
+    def _get_active_locked(
+        self,
+        conversation_id: ConversationId,
+        *,
+        now: datetime,
+    ) -> SessionInfo | None:
+        try:
+            normalized_id = _normalize_conversation_id(conversation_id)
+        except ValueError:
+            return None
+        session = self._sessions.get(normalized_id)
+        if session is None:
+            return None
+        if session.is_expired(now=now, expire_after=self._expire_after):
+            del self._sessions[normalized_id]
+            return None
+        return session
+
+    def _now(self) -> datetime:
+        return _coerce_utc(self._clock())
+
+
+def _copy_messages(messages: Iterable[Mapping[str, Any]]) -> list[SessionMessage]:
+    return [deepcopy(dict(message)) for message in messages]
+
+
+def _normalize_conversation_id(conversation_id: ConversationId) -> str:
+    try:
+        return str(UUID(str(conversation_id)))
+    except ValueError as exc:
+        raise ValueError("conversation_id must be a UUID") from exc
+
+
+def _coerce_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+session_store = SessionStore()
