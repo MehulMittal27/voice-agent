@@ -39,6 +39,13 @@ _DYNAMIC_VARIABLE_CONTAINER_KEYS = (
     "conversationInitiationClientData",
     "conversation_initiation_clientData",
 )
+_EXTRA_BODY_KEYS = (
+    "elevenlabs_extra_body",
+    "extra_body",
+    "extraBody",
+    "custom_llm_extra_body",
+    "customLlmExtraBody",
+)
 _SECRET_KEY_PARTS = (
     "api_key",
     "apikey",
@@ -58,7 +65,7 @@ async def chat_completions(request: Request) -> StreamingResponse:
     """Handle ElevenLabs Custom LLM calls and stream OpenAI-format SSE."""
     body = await _read_json_body(request)
     messages = _extract_messages(body)
-    perception_session_id, id_source = extract_perception_session_id(body)
+    perception_session_id, id_source = _resolve_perception_session_id(body)
 
     if perception_session_id:
         logger.info("Resolved perception_session_id from %s", id_source)
@@ -120,11 +127,13 @@ def extract_perception_session_id(body: Mapping[str, Any]) -> tuple[str | None, 
     if direct_value is not None:
         return direct_value, "top-level perception_session_id"
 
-    extra_body = _as_mapping(body.get("extra_body"))
-    if extra_body is not None:
+    for extra_body_key in _EXTRA_BODY_KEYS:
+        extra_body = _as_mapping(body.get(extra_body_key))
+        if extra_body is None:
+            continue
         extra_value, extra_source = _session_id_from_mapping_with_source(
             extra_body,
-            "extra_body",
+            extra_body_key,
         )
         if extra_value is not None:
             return extra_value, extra_source
@@ -149,6 +158,30 @@ def extract_perception_session_id(body: Mapping[str, Any]) -> tuple[str | None, 
         if metadata_value is not None:
             return metadata_value, metadata_source
 
+    return None, "missing"
+
+
+def _resolve_perception_session_id(body: Mapping[str, Any]) -> tuple[str | None, str]:
+    perception_session_id, id_source = extract_perception_session_id(body)
+    if perception_session_id is not None:
+        return perception_session_id, id_source
+
+    fallback_session = session_store.get_unambiguous_active()
+    if fallback_session is not None:
+        logger.warning(
+            "No perception_session_id in webhook body; using only active local "
+            "session %s as demo fallback",
+            fallback_session.conversation_id,
+        )
+        return fallback_session.perception_session_id, "single active local session fallback"
+
+    active_count = session_store.active_count()
+    if active_count > 1:
+        logger.warning(
+            "No perception_session_id in webhook body and %d active local sessions; "
+            "not guessing",
+            active_count,
+        )
     return None, "missing"
 
 

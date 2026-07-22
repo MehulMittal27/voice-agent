@@ -678,13 +678,12 @@
 
             const Conversation = await loadElevenLabsConversation();
             const dynamicVariables = { perception_session_id: perceptionSessionId };
+            const customLlmExtraBody = { perception_session_id: perceptionSessionId };
             app.conversation = await Conversation.startSession({
               agentId,
               connectionType: "websocket",
               dynamicVariables,
-              conversation_initiation_client_data: {
-                dynamic_variables: dynamicVariables,
-              },
+              customLlmExtraBody,
               onConnect: (event) => {
                 const conversationId = event && event.conversationId ? event.conversationId : "connected";
                 setPhase("connected", "Connected");

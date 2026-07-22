@@ -215,7 +215,9 @@ def _build_webhook_payload(
             },
             {"role": "user", "content": user_message},
         ],
-        "perception_session_id": perception_session_id,
+        "elevenlabs_extra_body": {
+            "perception_session_id": perception_session_id,
+        },
     }
 
 
