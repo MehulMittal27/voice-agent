@@ -36,9 +36,11 @@ This service depends on the **voice-perception** service.
    OpenAI `/chat/completions` endpoint with Server-Sent Events streaming.
    We call OpenAI upstream and stream its responses in that same format.
 3. **Session correlation** - the browser generates a perception session ID,
-   passes it to ElevenLabs as a dynamic variable, ElevenLabs forwards it to
-   our webhook on every LLM call, we query voice-perception with it. Clean
-   handoff, no shared state between services.
+   passes it to ElevenLabs as a dynamic variable for templates and as Custom
+   LLM extra body for the webhook. ElevenLabs forwards the extra body as
+   `elevenlabs_extra_body`, and we query voice-perception with that ID. If the
+   body is missing the ID, the webhook may fall back to the only active local
+   session for the one-session demo path.
 4. **Data layer is mocked tonight, real tomorrow.** All data lookups go
    through a `DataProvider` interface with a `MockDataProvider` implementation.
    Tomorrow, add `RealDataProvider` that hits BIBB / anabin / Integreat.
@@ -119,13 +121,17 @@ Request body (ElevenLabs sends this):
     {"role": "user", "content": "..."}
   ],
   "stream": true,
-  "perception_session_id": "<uuid>"
+  "elevenlabs_extra_body": {
+    "perception_session_id": "<uuid>"
+  }
 }
 ```
-`perception_session_id` may arrive as a top-level field, inside `extra_body`,
-under `conversation_initiation_client_data.dynamic_variables`, or inside the
-last user message's metadata depending on ElevenLabs SDK version. Handle all
-placements; log which one hit.
+Current ElevenLabs JS SDK calls send `customLlmExtraBody` to ElevenLabs, and
+Custom LLM requests receive it as `elevenlabs_extra_body`. Dynamic variables are
+for agent template expansion and are not guaranteed to arrive as raw Custom LLM
+body fields. Also handle legacy top-level fields, `extra_body`,
+`custom_llm_extra_body`, `conversation_initiation_client_data.dynamic_variables`,
+and last user message metadata; log which one hit.
 
 Response: SSE stream in OpenAI format:
 ```
@@ -280,13 +286,14 @@ call; they should hear the resulting answer.
 ## Session correlation flow
 
 1. Browser: `POST /session/start` on voice-agent -> receives `perception_session_id`
-2. Browser: initialises ElevenLabs SDK, passing `perception_session_id` inside
-   `conversation_initiation_client_data.dynamic_variables`
+2. Browser: initialises ElevenLabs SDK, passing `perception_session_id` in
+   `dynamicVariables` for ElevenLabs templates and in `customLlmExtraBody` for
+   the Custom LLM webhook
 3. Browser: opens the same-origin `/perception/audio/{perception_session_id}`
    proxy with the same `perception_session_id` - voice-agent forwards mic audio
    to voice-perception for analysis
 4. User speaks -> ElevenLabs STT + turn detection -> ElevenLabs calls our webhook
-   with the messages and the dynamic variable
+   with the messages and `elevenlabs_extra_body`
 5. Webhook extracts `perception_session_id`, fetches state, calls OpenAI,
    streams response back
 6. ElevenLabs speaks the response
@@ -306,7 +313,7 @@ python3 scripts/elevenlabs_agent.py create https://abc123.ngrok-free.app
 python3 scripts/elevenlabs_agent.py update-url https://new-url.ngrok-free.app
 ```
 
-The script configures the demo settings: name `zollhof-clerk-demo`, German output (`de`), empty first message, `eleven_flash_v2_5` TTS, Custom LLM URL `<public-base-url>/v1/chat/completions`, no Custom LLM auth for the unauthenticated local demo webhook, and dynamic variable placeholder `perception_session_id`. After creation or update it prints `ELEVENLABS_AGENT_ID=...` for `.env`.
+The script configures the demo settings: name `zollhof-clerk-demo`, German output (`de`), empty first message, `eleven_flash_v2_5` TTS, Custom LLM URL `<public-base-url>/v1/chat/completions`, no Custom LLM auth for the unauthenticated local demo webhook, and dynamic variable placeholder `perception_session_id`. The browser sends the same value in `customLlmExtraBody` at runtime so the webhook receives it as `elevenlabs_extra_body`. After creation or update it prints `ELEVENLABS_AGENT_ID=...` for `.env`.
 
 Optional MCP path: the project `.mcp.json` follows the official `uvx elevenlabs-mcp` config shape and contains only the placeholder `"<insert-your-api-key-here>"`. See `README.md` for setup, API key handling, local verification, and the same agent settings. Never commit `ELEVENLABS_API_KEY` or generated MCP output.
 
@@ -370,9 +377,12 @@ with `scripts/elevenlabs_agent.py update-url` after restarting ngrok. Consider
 - Ask the clerk about a profession -> tool call -> verbal answer
 
 ## Known gotchas
-1. **ElevenLabs dynamic variable placement varies.** Log the entire incoming
-   webhook body on the first request each session so you can see where
-   `perception_session_id` actually landed.
+1. **ElevenLabs dynamic variables are not Custom LLM body fields.** The JS SDK
+   supports `dynamicVariables` for agent templates and `customLlmExtraBody` for
+   extra webhook fields. Custom LLM requests expose the latter as
+   `elevenlabs_extra_body`. Log the first webhook body each session to confirm
+   where `perception_session_id` landed; if it is absent and exactly one local
+   session is active, the webhook uses that session as a demo fallback.
 2. **Perception client timeout matters.** If voice-perception is slow, don't
    block the whole webhook. 100ms timeout, fall back to defaults, log a warning.
 3. **SSE requires specific headers.** `Content-Type: text/event-stream`,

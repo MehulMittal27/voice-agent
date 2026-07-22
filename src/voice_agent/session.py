@@ -221,6 +221,18 @@ class SessionStore:
             self.cleanup_expired()
             return len(self._sessions)
 
+    def get_unambiguous_active(self, *, touch: bool = True) -> SessionInfo | None:
+        """Return the only active session, or None when missing or ambiguous."""
+        now = self._now()
+        with self._lock:
+            self.cleanup_expired(now=now)
+            if len(self._sessions) != 1:
+                return None
+            session = next(iter(self._sessions.values()))
+            if touch:
+                session.touch(now)
+            return session
+
     def clear(self) -> None:
         """Remove all sessions. Intended for tests and local demos."""
         with self._lock:
