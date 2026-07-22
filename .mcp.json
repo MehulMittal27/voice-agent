@@ -4,6 +4,7 @@
       "command": "uvx",
       "args": ["elevenlabs-mcp"],
       "env": {
+        "ELEVENLABS_API_KEY": "<insert-your-api-key-here>",
         "ELEVENLABS_MCP_BASE_PATH": ".elevenlabs-mcp-output",
         "ELEVENLABS_MCP_OUTPUT_MODE": "files"
       }
