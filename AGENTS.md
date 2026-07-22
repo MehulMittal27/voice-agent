@@ -295,23 +295,18 @@ const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 // stream is shared between ElevenLabs SDK AND voice-perception WebSocket
 ```
 
-## ElevenLabs agent creation (via ElevenLabs MCP)
+## ElevenLabs agent creation
 
-Use the official `elevenlabs/elevenlabs-mcp` server from <https://github.com/elevenlabs/elevenlabs-mcp>. The project `.mcp.json` follows the official `uvx elevenlabs-mcp` config shape and contains only the placeholder `"<insert-your-api-key-here>"`. See `README.md` for setup, API key handling, and local verification. Never commit `ELEVENLABS_API_KEY` or generated MCP output.
+Preferred no-MCP path: use `scripts/elevenlabs_agent.py` to create or update the Conversational AI agent directly through the ElevenLabs REST API. It reads `ELEVENLABS_API_KEY` from the environment or `.env` and never prints the key.
 
-Before connecting an MCP client, copy the server block into private client config or use client secret support so `ELEVENLABS_API_KEY` is supplied locally. Then create or update the Conversational AI agent through the MCP client with these settings:
+```bash
+python3 scripts/elevenlabs_agent.py create https://abc123.ngrok-free.app
+python3 scripts/elevenlabs_agent.py update-url https://new-url.ngrok-free.app
+```
 
-- **Name**: `zollhof-clerk-demo`
-- **Voice**: German-capable, warm, mid-pitch; preview with a short German sentence.
-- **Voice model**: `eleven_flash_v2_5` for low latency.
-- **Language**: German output (`de`); allow English caller input.
-- **First message**: empty.
-- **System prompt**: minimal placeholder such as `You are Frau Weber.`; the FastAPI webhook injects the real OpenAI system prompt each turn.
-- **LLM**: Custom LLM pointing to the public HTTPS webhook URL plus `/v1/chat/completions`.
-- **Custom LLM auth**: placeholder API key is acceptable for local demo unless auth is added server-side.
-- **Dynamic variables**: add `perception_session_id` so ElevenLabs forwards it to the webhook.
+The script configures the demo settings: name `zollhof-clerk-demo`, German output (`de`), empty first message, `eleven_flash_v2_5` TTS, Custom LLM URL `<public-base-url>/v1/chat/completions`, placeholder Custom LLM auth for the local demo, and dynamic variable placeholder `perception_session_id`. After creation or update it prints `ELEVENLABS_AGENT_ID=...` for `.env`.
 
-After creation, copy the returned agent ID into `.env` as `ELEVENLABS_AGENT_ID`.
+Optional MCP path: the project `.mcp.json` follows the official `uvx elevenlabs-mcp` config shape and contains only the placeholder `"<insert-your-api-key-here>"`. See `README.md` for setup, API key handling, local verification, and the same agent settings. Never commit `ELEVENLABS_API_KEY` or generated MCP output.
 
 ## Environment (`.env.example`)
 ```
@@ -320,6 +315,9 @@ After creation, copy the returned agent ID into `.env` as `ELEVENLABS_AGENT_ID`.
 # static/client-side code.
 ELEVENLABS_API_KEY=xi-your-api-key
 ELEVENLABS_AGENT_ID=agent_your-agent-id
+# Optional direct API script overrides.
+ELEVENLABS_AGENT_VOICE_ID=JBFqnCBsd6RMkjVDRZzb
+ELEVENLABS_AGENT_TTS_MODEL=eleven_flash_v2_5
 
 # OpenAI API key used by the FastAPI Custom LLM webhook. Keep server-side only.
 OPENAI_API_KEY=sk-your-openai-api-key
@@ -349,8 +347,8 @@ Copy the HTTPS URL (e.g. `https://abc123.ngrok-free.app`) and configure the
 ElevenLabs Custom LLM server URL as that URL plus `/v1/chat/completions`.
 
 Free ngrok tunnels expire on restart - expect to update the Custom LLM URL
-through the ElevenLabs MCP flow after restarting ngrok. Consider `cloudflared`
-for a stable tunnel if you want to avoid this.
+with `scripts/elevenlabs_agent.py update-url` after restarting ngrok. Consider
+`cloudflared` for a stable tunnel if you want to avoid this.
 
 ## Testing rules
 
@@ -364,7 +362,7 @@ for a stable tunnel if you want to avoid this.
 **End-to-end test:**
 - Start voice-perception (see its repo README)
 - Start voice-agent on 8001
-- Start ngrok on 8001, then update the ElevenLabs Custom LLM URL via MCP
+- Start ngrok on 8001, then update the ElevenLabs Custom LLM URL with `python3 scripts/elevenlabs_agent.py update-url <public-url>`
 - Open the browser UI -> Start -> grant mic -> see perception state updating
 - Speak English -> hear German reply within ~1.5s
 - Speak with clearly anxious tone -> hesitation score rises, clerk softens
