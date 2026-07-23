@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base import Authority, DataProvider, Document, Occupation
+from .base import Authority, DataProvider, Document, LabourMarketStatus, Occupation
 
 __all__ = [
     "Authority",
     "DataProvider",
     "Document",
+    "LabourMarketStatus",
     "MockDataProvider",
     "Occupation",
 ]

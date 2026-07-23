@@ -3,26 +3,31 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import json
+import logging
 import re
-import unicodedata
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
+from functools import lru_cache
+from pathlib import Path
+from typing import Final, NamedTuple
 
-from .base import Authority, DataProvider, Document, Occupation
+from .base import Authority, DataProvider, Document, LabourMarketStatus, Occupation
 
+logger = logging.getLogger(__name__)
 
-@dataclass(frozen=True)
-class _ProfessionRecord:
-    """Immutable bundle for one mocked profession."""
-
-    key: str
-    occupation: Occupation
-    aliases: tuple[str, ...]
-    authority: Authority
-    documents: tuple[Document, ...]
-
-
-_COMMON_DOCUMENTS: tuple[Document, ...] = (
+_CSV_PATH = Path(__file__).parent / "nuremberg_authorities.csv"
+_PROFESSION_FIELDS: Final[tuple[str, ...]] = (
+    "profession_de",
+    "profession_en",
+    "profession_uk",
+)
+_FIELD_LANG: Final[dict[str, str]] = {
+    "profession_de": "de",
+    "profession_en": "en",
+    "profession_uk": "uk",
+}
+_BASELINE_DOCUMENTS: Final[tuple[Document, ...]] = (
     Document(
         name_de="Identitätsnachweis",
         name_en="Proof of identity",
@@ -31,365 +36,596 @@ _COMMON_DOCUMENTS: tuple[Document, ...] = (
     Document(
         name_de="Tabellarischer Lebenslauf",
         name_en="Curriculum vitae",
-        notes="Auf Deutsch, mit Ausbildung, Berufserfahrung und aktuellen Kontaktdaten.",
+        notes="Auf Deutsch, mit Ausbildung, Berufserfahrung und Kontaktdaten.",
     ),
     Document(
-        name_de="Abschlusszeugnis und Diplom",
-        name_en="Diploma and final certificate",
-        notes="Mit vereidigter deutscher Übersetzung, falls das Original nicht deutsch ist.",
+        name_de="Abschlusszeugnis oder Diplom",
+        name_en="Diploma or final certificate",
+        notes="Mit vereidigter deutscher Übersetzung, wenn das Original nicht deutsch ist.",
     ),
     Document(
         name_de="Fächer- und Stundenübersicht",
         name_en="Transcript of subjects and hours",
-        notes="Hilft der Stelle, Inhalte und Umfang der Ausbildung zu vergleichen.",
+        notes="Zeigt der Stelle Inhalt und Umfang der Ausbildung.",
     ),
     Document(
-        name_de="Arbeitszeugnisse",
-        name_en="Employment references",
-        notes="Nachweise über einschlägige Berufserfahrung, möglichst mit Aufgabenbeschreibung.",
+        name_de="Arbeitsnachweise",
+        name_en="Employment evidence",
+        notes="Arbeitszeugnisse oder Verträge mit möglichst genauer Aufgabenbeschreibung.",
     ),
 )
+_DOCUMENTS_BY_CATEGORY: Final[dict[str, tuple[Document, ...]]] = {
+    "Approbationsberuf": (
+        Document(
+            name_de="Identitätsnachweis",
+            name_en="Proof of identity",
+            notes="Reisepass oder Personalausweis als Kopie.",
+        ),
+        Document(
+            name_de="Ausbildungsabschluss und Fächerübersicht",
+            name_en="Degree certificate and transcript",
+            notes="Diplom, Stundenumfang und Inhalte mit deutscher Übersetzung.",
+        ),
+        Document(
+            name_de="Berufszulassung im Herkunftsland",
+            name_en="Professional licence in country of origin",
+            notes="Nachweis, dass Sie dort selbstständig im Beruf arbeiten dürfen.",
+        ),
+        Document(
+            name_de="Certificate of Good Standing",
+            name_en="Certificate of good standing",
+            notes="Aktuelle Bescheinigung der zuständigen Kammer oder Behörde.",
+        ),
+        Document(
+            name_de="Deutsch- und Fachsprachennachweis",
+            name_en="German and professional language proof",
+            notes="Meist B2 Deutsch plus Fachsprachprüfung oder C1 Medizin.",
+        ),
+        Document(
+            name_de="Ärztliches Attest und Führungszeugnis",
+            name_en="Medical certificate and certificate of good conduct",
+            notes="Oft erst kurz vor der endgültigen Erlaubnis nötig.",
+        ),
+    ),
+    "Approbationsberuf + Facharztanerkennung": (
+        Document(
+            name_de="Approbation oder ärztliche Berufserlaubnis",
+            name_en="Medical licence or temporary professional permit",
+            notes="Die Facharztanerkennung baut auf der ärztlichen Zulassung auf.",
+        ),
+        Document(
+            name_de="Facharztdiplom",
+            name_en="Specialist medical certificate",
+            notes="Urkunde über die abgeschlossene Spezialisierung im Herkunftsland.",
+        ),
+        Document(
+            name_de="Weiterbildungslogbuch",
+            name_en="Specialist training logbook",
+            notes="Rotationen, Eingriffe, Dauer und Inhalte möglichst genau aufführen.",
+        ),
+        Document(
+            name_de="Arbeitszeugnisse aus Kliniken",
+            name_en="Clinical employment references",
+            notes="Mit Fachgebiet, Zeitraum, Wochenstunden und Aufgaben.",
+        ),
+        Document(
+            name_de="Certificate of Good Standing",
+            name_en="Certificate of good standing",
+            notes="Aktuelle Bescheinigung der ärztlichen Aufsichtsbehörde.",
+        ),
+        Document(
+            name_de="Deutsch-Fachsprachennachweis",
+            name_en="Medical German language proof",
+            notes="Fachsprachprüfung oder gleichwertiger Nachweis.",
+        ),
+    ),
+    "Gesundheitsfachberuf": (
+        Document(
+            name_de="Identitätsnachweis",
+            name_en="Proof of identity",
+            notes="Reisepass oder Personalausweis als gut lesbare Kopie.",
+        ),
+        Document(
+            name_de="Berufsabschluss im Gesundheitsberuf",
+            name_en="Health profession diploma",
+            notes="Diplom oder Zeugnis mit deutscher Übersetzung.",
+        ),
+        Document(
+            name_de="Stunden- und Fächerübersicht",
+            name_en="Transcript of hours and subjects",
+            notes="Theorie, Praxis, Einsätze und Gesamtstunden sind wichtig.",
+        ),
+        Document(
+            name_de="Berufszulassung oder Registrierung",
+            name_en="Professional licence or registration",
+            notes="Nachweis aus dem Herkunftsland, falls dort vorgeschrieben.",
+        ),
+        Document(
+            name_de="Deutsch-Sprachnachweis B2",
+            name_en="German language certificate B2",
+            notes="Für Patientenkontakt wird in der Regel B2 erwartet.",
+        ),
+        Document(
+            name_de="Führungszeugnis und ärztliches Attest",
+            name_en="Certificate of good conduct and medical certificate",
+            notes="Die Behörde sagt Ihnen, wann diese Unterlagen aktuell sein müssen.",
+        ),
+    ),
+    "Handwerksberuf": (
+        Document(
+            name_de="Identitätsnachweis und Lebenslauf",
+            name_en="Proof of identity and CV",
+            notes="Mit Ausbildung, Gesellenzeit und Berufspraxis.",
+        ),
+        Document(
+            name_de="Ausbildungszeugnis",
+            name_en="Vocational training certificate",
+            notes="Abschluss der Berufsausbildung mit deutscher Übersetzung.",
+        ),
+        Document(
+            name_de="Ausbildungsinhalte oder Lehrplan",
+            name_en="Training curriculum",
+            notes="Hilft der Handwerkskammer beim Vergleich mit dem deutschen Beruf.",
+        ),
+        Document(
+            name_de="Arbeitszeugnisse und Tätigkeitsnachweise",
+            name_en="Employment references and task evidence",
+            notes="Zeigen Sie möglichst konkrete Maschinen, Anlagen oder Techniken.",
+        ),
+        Document(
+            name_de="Nachweise über Weiterbildungen",
+            name_en="Further training certificates",
+            notes="Zum Beispiel Elektro, SHK, Kfz-Diagnose oder Schweißscheine.",
+        ),
+    ),
+    "IHK-Beruf": (
+        Document(
+            name_de="IHK-FOSA-Antragsformular",
+            name_en="IHK FOSA application form",
+            notes="Für duale IHK-Berufe ist IHK FOSA die zentrale Stelle.",
+        ),
+        Document(
+            name_de="Identitätsnachweis und Lebenslauf",
+            name_en="Proof of identity and CV",
+            notes="Bitte mit aktueller Adresse und beruflichem Verlauf.",
+        ),
+        Document(
+            name_de="Ausbildungsabschluss",
+            name_en="Vocational qualification certificate",
+            notes="Zeugnis oder Diplom der abgeschlossenen Ausbildung.",
+        ),
+        Document(
+            name_de="Ausbildungsplan oder Fächerübersicht",
+            name_en="Training plan or transcript",
+            notes="Beschreibt Dauer, Inhalte und Prüfungen.",
+        ),
+        Document(
+            name_de="Arbeitszeugnisse",
+            name_en="Employment references",
+            notes="Berufserfahrung kann Unterschiede teilweise ausgleichen.",
+        ),
+    ),
+    "Reglementierter Titel": (
+        Document(
+            name_de="Identitätsnachweis",
+            name_en="Proof of identity",
+            notes="Reisepass oder Personalausweis als Kopie.",
+        ),
+        Document(
+            name_de="Hochschulabschluss",
+            name_en="University degree certificate",
+            notes="Diplom, Bachelor oder Master mit Übersetzung.",
+        ),
+        Document(
+            name_de="Modulhandbuch oder Studienplan",
+            name_en="Module handbook or study plan",
+            notes="Wichtig für den fachlichen Vergleich.",
+        ),
+        Document(
+            name_de="Nachweis zur Berufsbezeichnung",
+            name_en="Proof of right to use the title",
+            notes="Falls Sie den geschützten Titel im Herkunftsland führen durften.",
+        ),
+        Document(
+            name_de="Berufserfahrung und Projektliste",
+            name_en="Professional experience and project list",
+            notes="Vor allem bei Ingenieurberufen hilfreich.",
+        ),
+    ),
+    "Zeugnisanerkennung": (
+        Document(
+            name_de="Schulabschlusszeugnis",
+            name_en="School-leaving certificate",
+            notes="Original oder beglaubigte Kopie des Abschlusszeugnisses.",
+        ),
+        Document(
+            name_de="Fächer- und Notenübersicht",
+            name_en="Subjects and grades overview",
+            notes="Mit Schuljahren, Noten und Abschlussdatum.",
+        ),
+        Document(
+            name_de="Deutsche Übersetzung",
+            name_en="German translation",
+            notes="Von vereidigten Übersetzerinnen oder Übersetzern.",
+        ),
+        Document(
+            name_de="Identitätsnachweis",
+            name_en="Proof of identity",
+            notes="Reisepass, Personalausweis oder Aufenthaltstitel.",
+        ),
+        Document(
+            name_de="Antragsformular der Zeugnisanerkennungsstelle",
+            name_en="Certificate recognition application form",
+            notes="Die Zeugnisanerkennungsstelle stellt das Formular bereit.",
+        ),
+    ),
+    "Nicht reglementiert (Führerschein)": (
+        Document(
+            name_de="Ausländischer Führerschein",
+            name_en="Foreign driving licence",
+            notes="Original und Kopie des gültigen Führerscheins.",
+        ),
+        Document(
+            name_de="Übersetzung oder internationaler Führerschein",
+            name_en="Translation or international driving permit",
+            notes="Wenn die Fahrerlaubnisbehörde es verlangt.",
+        ),
+        Document(
+            name_de="Identitätsnachweis und Aufenthaltstitel",
+            name_en="Proof of identity and residence permit",
+            notes="Für die Umschreibung bei der Führerscheinstelle.",
+        ),
+        Document(
+            name_de="Biometrisches Passfoto",
+            name_en="Biometric passport photo",
+            notes="Aktuelles Foto für den deutschen Führerschein.",
+        ),
+        Document(
+            name_de="Sehtest und Erste-Hilfe-Nachweis",
+            name_en="Eye test and first-aid proof",
+            notes="Je nach Klasse und Herkunftsland kann das nötig sein.",
+        ),
+    ),
+}
 
 
-_RECORDS: tuple[_ProfessionRecord, ...] = (
-    _ProfessionRecord(
-        key="nurse",
-        occupation=Occupation(
-            esco_id="http://data.europa.eu/esco/occupation/healthcare-nurse",
-            label_de="Krankenschwester",
-            label_en="Registered nurse",
-            kldb_code="81302",
-            confidence=0.96,
-        ),
-        aliases=(
-            "nurse",
-            "registered nurse",
-            "staff nurse",
-            "pflegefachfrau",
-            "pflegefachmann",
-            "pflegefachkraft",
-            "krankenschwester",
-            "krankenpfleger",
-        ),
-        authority=Authority(
-            name="Beratungsstelle für Anerkennung ausländischer Berufsqualifikationen Nürnberg (Marienstraße 23)",
-            city="Nürnberg",
-            email="anerkennung-pflege@nuernberg.de",
-            phone="+49 911 231-10420",
-            website="https://www.nuernberg.de/internet/anerkennung/",
-        ),
-        documents=(
-            *_COMMON_DOCUMENTS,
-            Document(
-                name_de="Berufszulassung oder Registrierung",
-                name_en="Professional licence or registration",
-                notes="Nachweis, dass Sie im Herkunftsland als Pflegekraft arbeiten dürfen.",
-            ),
-            Document(
-                name_de="Deutsch-Sprachnachweis B2",
-                name_en="German language certificate B2",
-                notes="Für die Berufserlaubnis wird in der Regel mindestens B2 verlangt.",
-            ),
-            Document(
-                name_de="Ärztliches Attest und Führungszeugnis",
-                name_en="Medical certificate and certificate of good conduct",
-                notes="Meist erst kurz vor der endgültigen Erlaubnis erforderlich.",
-            ),
-        ),
-    ),
-    _ProfessionRecord(
-        key="engineer",
-        occupation=Occupation(
-            esco_id="http://data.europa.eu/esco/occupation/professional-engineer",
-            label_de="Ingenieur",
-            label_en="Engineer",
-            kldb_code="25104",
-            confidence=0.93,
-        ),
-        aliases=(
-            "engineer",
-            "engineering",
-            "civil engineer",
-            "mechanical engineer",
-            "electrical engineer",
-            "ingenieur",
-            "bauingenieur",
-            "maschinenbauingenieur",
-            "elektroingenieur",
-        ),
-        authority=Authority(
-            name="Bayerische Ingenieurekammer-Bau - Anerkennungsberatung Nürnberg (Äußere Sulzbacher Straße 159)",
-            city="Nürnberg",
-            email="anerkennung@bayika.de",
-            phone="+49 911 941-4800",
-            website="https://www.bayika.de/de/anerkennung/",
-        ),
-        documents=(
-            *_COMMON_DOCUMENTS,
-            Document(
-                name_de="Modulhandbuch oder Studienplan",
-                name_en="Module handbook or study plan",
-                notes="Besonders wichtig, wenn die Studieninhalte nicht klar aus dem Zeugnis hervorgehen.",
-            ),
-            Document(
-                name_de="Nachweis der Berufspraxis",
-                name_en="Proof of professional practice",
-                notes="Projektlisten, Arbeitsverträge oder Referenzen können die Bewertung stützen.",
-            ),
-            Document(
-                name_de="Nachweis über die Führung der Berufsbezeichnung",
-                name_en="Proof of right to use the professional title",
-                notes="Falls Sie im Herkunftsland bereits eine geschützte Ingenieurbezeichnung geführt haben.",
-            ),
-        ),
-    ),
-    _ProfessionRecord(
-        key="teacher",
-        occupation=Occupation(
-            esco_id="http://data.europa.eu/esco/occupation/school-teacher",
-            label_de="Lehrer",
-            label_en="Teacher",
-            kldb_code="84114",
-            confidence=0.92,
-        ),
-        aliases=(
-            "teacher",
-            "school teacher",
-            "secondary teacher",
-            "primary teacher",
-            "lehrer",
-            "lehrerin",
-            "grundschullehrer",
-            "gymnasiallehrer",
-        ),
-        authority=Authority(
-            name="Regierung von Mittelfranken - Anerkennung Lehramt (Keßlerplatz 12)",
-            city="Nürnberg",
-            email="lehramt-anerkennung@reg-mfr.bayern.de",
-            phone="+49 911 235-1850",
-            website="https://www.regierung.mittelfranken.bayern.de/",
-        ),
-        documents=(
-            *_COMMON_DOCUMENTS,
-            Document(
-                name_de="Nachweis der Lehramtsbefähigung",
-                name_en="Proof of teaching qualification",
-                notes="Urkunden oder Bescheinigungen über die volle Lehrbefähigung im Herkunftsland.",
-            ),
-            Document(
-                name_de="Praxisnachweise aus Schulen",
-                name_en="Proof of school teaching practice",
-                notes="Stundenumfang, Schulart, Fächer und Klassenstufen sollten erkennbar sein.",
-            ),
-            Document(
-                name_de="Deutsch-Sprachnachweis C1",
-                name_en="German language certificate C1",
-                notes="Für den Schuldienst wird meist ein sehr gutes Deutschniveau erwartet.",
-            ),
-        ),
-    ),
-    _ProfessionRecord(
-        key="doctor",
-        occupation=Occupation(
-            esco_id="http://data.europa.eu/esco/occupation/medical-doctor",
-            label_de="Arzt",
-            label_en="Medical doctor",
-            kldb_code="81404",
-            confidence=0.95,
-        ),
-        aliases=(
-            "doctor",
-            "medical doctor",
-            "physician",
-            "general practitioner",
-            "arzt",
-            "ärztin",
-            "mediziner",
-            "approbation arzt",
-        ),
-        authority=Authority(
-            name="Approbationsstelle Mittelfranken für Ärztinnen und Ärzte (Sulzbacher Straße 11)",
-            city="Nürnberg",
-            email="approbation@reg-mfr.bayern.de",
-            phone="+49 911 235-3500",
-            website="https://www.regierung.mittelfranken.bayern.de/aufgaben/40068/40080/leistung/leistung_12515/",
-        ),
-        documents=(
-            *_COMMON_DOCUMENTS,
-            Document(
-                name_de="Ärztliche Berufszulassung aus dem Herkunftsland",
-                name_en="Medical licence from country of origin",
-                notes="Approbation, Registrierung oder vergleichbarer Nachweis der Berufsausübung.",
-            ),
-            Document(
-                name_de="Certificate of Good Standing",
-                name_en="Certificate of good standing",
-                notes="Aktuelle Bescheinigung der zuständigen Ärztekammer oder Behörde.",
-            ),
-            Document(
-                name_de="Fachsprachprüfung oder Deutsch C1 Medizin",
-                name_en="Medical German language proof",
-                notes="Für Ärztinnen und Ärzte wird zusätzlich zur Alltagssprache Fachsprache geprüft.",
-            ),
-            Document(
-                name_de="Ärztliches Attest und Führungszeugnis",
-                name_en="Medical certificate and certificate of good conduct",
-                notes="Die Unterlagen dürfen bei Antragstellung oft nur wenige Monate alt sein.",
-            ),
-        ),
-    ),
-    _ProfessionRecord(
-        key="it-admin",
-        occupation=Occupation(
-            esco_id="http://data.europa.eu/esco/occupation/ict-system-administrator",
-            label_de="Fachinformatiker Systemintegration",
-            label_en="IT systems administrator",
-            kldb_code="43102",
-            confidence=0.94,
-        ),
-        aliases=(
-            "it admin",
-            "it administrator",
-            "systems administrator",
-            "system administrator",
-            "network administrator",
-            "ict system administrator",
-            "fachinformatiker systemintegration",
-            "fachinformatikerin systemintegration",
-            "systemadministrator",
-            "netzwerkadministrator",
-        ),
-        authority=Authority(
-            name="IHK Nürnberg für Mittelfranken - Anerkennungsberatung / IHK FOSA (Ulmenstraße 52g)",
-            city="Nürnberg",
-            email="anerkennung@nuernberg.ihk.de",
-            phone="+49 911 1335-112",
-            website="https://www.ihk-nuernberg.de/anerkennung",
-        ),
-        documents=(
-            *_COMMON_DOCUMENTS,
-            Document(
-                name_de="Ausbildungsordnung oder Lehrplan",
-                name_en="Training regulation or curriculum",
-                notes="Beschreibt, welche technischen Inhalte Ihre Ausbildung abgedeckt hat.",
-            ),
-            Document(
-                name_de="Projekt- und Tätigkeitsnachweise",
-                name_en="Project and task evidence",
-                notes="Zum Beispiel Serveradministration, Netzwerke, Ticketsysteme oder Cloud-Betrieb.",
-            ),
-            Document(
-                name_de="IHK-FOSA-Antragsformular",
-                name_en="IHK FOSA application form",
-                notes="Für duale Ausbildungsberufe ist die IHK FOSA häufig die zentrale Stelle.",
-            ),
-        ),
-    ),
-)
+class _RowMatch(NamedTuple):
+    row_index: int
+    row: dict[str, str]
+    field: str
+    confidence: float
+    exact: bool
+
+
+@lru_cache(maxsize=1)
+def _load_authorities() -> list[dict[str, str]]:
+    """Load the verified Nürnberg authority CSV once."""
+    with _CSV_PATH.open("r", encoding="utf-8", newline="") as handle:
+        rows = [dict(row) for row in csv.DictReader(handle)]
+    logger.info("Loaded %d authority rows from nuremberg_authorities.csv", len(rows))
+    return rows
 
 
 class MockDataProvider(DataProvider):
-    """Hardcoded mock provider for the hackathon demo."""
+    """CSV-backed mock provider for the hackathon demo."""
 
     def __init__(self) -> None:
-        self._records = _RECORDS
+        self._authority_rows = _load_authorities()
 
     async def find_german_occupation(
         self,
         description: str,
         source_lang: str,
     ) -> list[Occupation]:
-        """Return plausible German occupation candidates for free text."""
-        _ = source_lang
+        """Return German occupation candidates from the verified CSV."""
         query = _normalize(description)
         if not query:
+            logger.info(
+                "Occupation lookup description=%r source_lang=%s matched none",
+                description,
+                source_lang,
+            )
             return []
 
-        ranked: list[tuple[float, Occupation]] = []
-        for record in self._records:
-            score = _match_score(query, record)
-            if score > 0:
-                ranked.append((score, record.occupation))
+        matches = [
+            match
+            for match in _iter_profession_matches(query, self._authority_rows)
+            if _normalize(match.row.get("category", "")) != "beratung"
+        ]
+        matches.sort(key=lambda match: (not match.exact, match.row_index))
 
-        ranked.sort(key=lambda item: (-item[0], -item[1].confidence, item[1].label_de))
-        return [occupation for _, occupation in ranked]
+        occupations: list[Occupation] = []
+        for match in matches[:3]:
+            logger.info(
+                "Occupation lookup description=%r source_lang=%s matched_lang=%s "
+                "matched_field=%s matched_row=%s profession_de=%r",
+                description,
+                source_lang,
+                _FIELD_LANG[match.field],
+                match.field,
+                match.row_index,
+                match.row.get("profession_de", ""),
+            )
+            occupations.append(
+                Occupation(
+                    esco_id=f"MOCK-{match.row_index}",
+                    label_de=match.row.get("profession_de", ""),
+                    label_en=match.row.get("profession_en", ""),
+                    kldb_code=None,
+                    confidence=match.confidence,
+                )
+            )
+
+        if not occupations:
+            logger.info(
+                "Occupation lookup description=%r source_lang=%s matched none",
+                description,
+                source_lang,
+            )
+        return occupations
 
     async def get_recognition_authority(
         self,
         profession: str,
         city: str = "Nürnberg",
     ) -> Authority | None:
-        """Return the local Nürnberg-area authority for a known profession."""
-        _ = city
-        record = self._best_match(profession)
-        if record is None:
+        """Return the recognition authority for a profession, falling back to KuBB."""
+        match = _first_profession_match(profession, self._authority_rows)
+        row = match.row if match is not None else _fallback_row(self._authority_rows)
+        if row is None:
+            logger.info(
+                "Authority lookup profession=%r matched_row=None confidence=None",
+                profession,
+            )
             return None
-        return record.authority
+
+        logger.info(
+            "Authority lookup profession=%r matched_row=%r confidence=%s",
+            profession,
+            row.get("profession_de", ""),
+            row.get("confidence", ""),
+        )
+        return _authority_from_row(row, city)
 
     async def get_required_documents(self, profession: str) -> list[Document]:
-        """Return the document checklist for a known profession."""
-        record = self._best_match(profession)
-        if record is None:
-            return []
-        return list(record.documents)
+        """Return a category-aware document checklist for a profession."""
+        match = _first_profession_match(profession, self._authority_rows)
+        if match is None:
+            return list(_BASELINE_DOCUMENTS)
 
-    def _best_match(self, profession: str) -> _ProfessionRecord | None:
-        query = _normalize(profession)
-        if not query:
-            return None
+        category = match.row.get("category", "").strip()
+        return list(_documents_for_category(category))
 
-        best_record: _ProfessionRecord | None = None
-        best_score = 0.0
-        for record in self._records:
-            score = _match_score(query, record)
-            if score > best_score:
-                best_score = score
-                best_record = record
-        return best_record
-
-
-def _normalize(text: str) -> str:
-    text = text.replace("ß", "ss").replace("ẞ", "SS")
-    decomposed = unicodedata.normalize("NFKD", text)
-    ascii_text = decomposed.encode("ascii", "ignore").decode("ascii")
-    words_only = re.sub(r"[^a-z0-9]+", " ", ascii_text.lower())
-    return re.sub(r"\s+", " ", words_only).strip()
+    async def get_labour_market_status(
+        self,
+        profession: str,
+        region: str = "Bayern",
+    ) -> LabourMarketStatus:
+        """Return plausible labour-market shortage data for the profession."""
+        match = _first_profession_match(profession, self._authority_rows)
+        row = match.row if match is not None else None
+        status = _labour_market_status_for_row(profession, region, row)
+        logger.info(
+            "Labour market lookup profession=%r matched_row=%r category=%r shortage=%s",
+            profession,
+            row.get("profession_de", "") if row is not None else None,
+            row.get("category", "") if row is not None else None,
+            status.shortage,
+        )
+        return status
 
 
-def _match_score(query: str, record: _ProfessionRecord) -> float:
-    aliases = (record.occupation.label_de, record.occupation.label_en, *record.aliases)
-    query_tokens = set(query.split())
-    best_score = 0.0
+def _normalize(text: str | None) -> str:
+    if text is None:
+        return ""
+    normalized = re.sub(r"\s+", " ", text.casefold().strip())
+    return normalized.strip(" .,;:!?()[]{}\"'")
 
-    for alias in aliases:
-        normalized_alias = _normalize(alias)
-        if not normalized_alias:
+
+def _iter_profession_matches(
+    query: str,
+    rows: list[dict[str, str]],
+) -> list[_RowMatch]:
+    matches: list[_RowMatch] = []
+    for row_index, row in enumerate(rows, start=1):
+        match = _match_row(query, row_index, row)
+        if match is not None:
+            matches.append(match)
+    return matches
+
+
+def _first_profession_match(
+    profession: str,
+    rows: list[dict[str, str]],
+) -> _RowMatch | None:
+    query = _normalize(profession)
+    if not query:
+        return None
+
+    first_substring_match: _RowMatch | None = None
+    for row_index, row in enumerate(rows, start=1):
+        match = _match_row(query, row_index, row)
+        if match is None:
             continue
+        if match.exact:
+            return match
+        if first_substring_match is None:
+            first_substring_match = match
+    return first_substring_match
 
-        if query == normalized_alias:
-            best_score = max(best_score, 3.0 + record.occupation.confidence)
-        elif normalized_alias in query:
-            best_score = max(
-                best_score,
-                2.0 + record.occupation.confidence + min(len(normalized_alias), 80) / 100,
-            )
-        elif query in normalized_alias:
-            best_score = max(
-                best_score,
-                1.0 + record.occupation.confidence + min(len(query), 80) / 100,
-            )
-        else:
-            alias_tokens = set(normalized_alias.split())
-            overlap = query_tokens & alias_tokens
-            if alias_tokens and overlap == alias_tokens:
-                best_score = max(best_score, 1.5 + record.occupation.confidence)
-            elif len(overlap) >= 2:
-                best_score = max(
-                    best_score,
-                    0.5 + record.occupation.confidence + len(overlap) / max(len(alias_tokens), 1),
-                )
 
-    return best_score
+def _match_row(query: str, row_index: int, row: dict[str, str]) -> _RowMatch | None:
+    for field in _PROFESSION_FIELDS:
+        value = _normalize(row.get(field, ""))
+        if not value:
+            continue
+        if query == value:
+            return _RowMatch(row_index, row, field, 0.95, True)
+        if query in value or value in query:
+            return _RowMatch(row_index, row, field, 0.75, False)
+    return None
+
+
+def _fallback_row(rows: list[dict[str, str]]) -> dict[str, str] | None:
+    for row in rows:
+        if _normalize(row.get("category", "")) == "beratung":
+            return row
+    return None
+
+
+def _authority_from_row(row: dict[str, str], fallback_city: str) -> Authority:
+    address = row.get("authority_address", "").strip()
+    city = fallback_city
+    if address:
+        last_token = address.split()[-1].strip().strip(",")
+        if last_token:
+            city = last_token
+
+    email = row.get("authority_email", "").strip() or None
+    return Authority(
+        name=row.get("authority_name", "").strip(),
+        city=city,
+        email=email,
+        phone=row.get("authority_phone", "").strip(),
+        website=row.get("authority_website", "").strip(),
+    )
+
+
+def _documents_for_category(category: str) -> tuple[Document, ...]:
+    if category in _DOCUMENTS_BY_CATEGORY:
+        return _DOCUMENTS_BY_CATEGORY[category]
+    if category.startswith("Gesundheitsfachberuf"):
+        return _DOCUMENTS_BY_CATEGORY["Gesundheitsfachberuf"]
+    return _BASELINE_DOCUMENTS
+
+
+def _labour_market_status_for_row(
+    profession: str,
+    region: str,
+    row: dict[str, str] | None,
+) -> LabourMarketStatus:
+    profession_label = profession.strip() or "Unbekannte Profession"
+    category = ""
+    haystack = _normalize(profession)
+    if row is not None:
+        profession_label = row.get("profession_de", "").strip() or profession_label
+        category = row.get("category", "").strip()
+        haystack = _normalize(
+            " ".join(
+                [
+                    profession,
+                    row.get("profession_de", ""),
+                    row.get("profession_en", ""),
+                    row.get("profession_uk", ""),
+                    category,
+                ]
+            )
+        )
+
+    if _contains_any(haystack, ("pflege", "nurse", "медсестра", "медична сестра")):
+        return LabourMarketStatus(
+            profession=profession_label,
+            region=region,
+            shortage=True,
+            shortage_level="hoch",
+            open_positions=12000,
+            applicants_per_opening=0.4,
+            note="Rund 12.000 offene Stellen in Bayern; Pflege ist ein klarer Mangelberuf.",
+        )
+    if _contains_any(haystack, ("arzt", "ärztin", "doctor", "лікар")):
+        return LabourMarketStatus(
+            profession=profession_label,
+            region=region,
+            shortage=True,
+            shortage_level="hoch",
+            open_positions=5500,
+            applicants_per_opening=0.5,
+            note="Ärztinnen und Ärzte werden gesucht; die Approbation ist meist der Engpass.",
+        )
+    if _contains_any(haystack, ("kfz", "car mechanic", "автомеханік")):
+        return LabourMarketStatus(
+            profession=profession_label,
+            region=region,
+            shortage=True,
+            shortage_level="hoch",
+            open_positions=3800,
+            applicants_per_opening=0.6,
+            note="Kfz-Mechatronik ist in Bayern knapp; praktische Erfahrung hilft sehr.",
+        )
+    if category == "Handwerksberuf" and _contains_any(
+        haystack,
+        (
+            "elektroniker",
+            "electrician",
+            "електрик",
+            "anlagenmechaniker",
+            "plumber",
+            "shk",
+            "сантехнік",
+        ),
+    ):
+        return LabourMarketStatus(
+            profession=profession_label,
+            region=region,
+            shortage=True,
+            shortage_level="hoch",
+            open_positions=6200,
+            applicants_per_opening=0.7,
+            note="Elektro- und SHK-Handwerk sind Mangelbereiche mit vielen offenen Stellen.",
+        )
+    if _contains_any(haystack, ("fachinformatiker", "it specialist", "it-спеціаліст")):
+        return LabourMarketStatus(
+            profession=profession_label,
+            region=region,
+            shortage=True,
+            shortage_level="mittel",
+            open_positions=7400,
+            applicants_per_opening=0.9,
+            note="IT-Fachkräfte sind gefragt; Anerkennung ist hilfreich, aber oft nicht die größte Hürde.",
+        )
+    if _contains_any(haystack, ("erzieher", "kindergarten teacher", "вихователь")):
+        return LabourMarketStatus(
+            profession=profession_label,
+            region=region,
+            shortage=True,
+            shortage_level="hoch",
+            open_positions=6900,
+            applicants_per_opening=0.5,
+            note="Kitas suchen stark; mit Anerkennung oder Anpassungsqualifizierung steigen die Chancen.",
+        )
+    if _contains_any(haystack, ("einzelhandel", "retail", "продавець")):
+        return LabourMarketStatus(
+            profession=profession_label,
+            region=region,
+            shortage=False,
+            shortage_level="normal",
+            open_positions=9000,
+            applicants_per_opening=2.8,
+            note="Es gibt viele Stellen im Verkauf, aber es ist kein klarer Mangelberuf.",
+        )
+    if category in {"Reglementierter Titel", "Reglementierter Beruf"}:
+        return LabourMarketStatus(
+            profession=profession_label,
+            region=region,
+            shortage=False,
+            shortage_level="regional unterschiedlich",
+            open_positions=1800,
+            applicants_per_opening=2.1,
+            note="Die Chancen hängen stark vom Fachgebiet ab; die Anerkennung des Titels hilft beim Einstieg.",
+        )
+    return LabourMarketStatus(
+        profession=profession_label,
+        region=region,
+        shortage=False,
+        shortage_level="normal",
+        open_positions=2200,
+        applicants_per_opening=2.4,
+        note="Es gibt Stellen, aber die Lage ist eher normal; Berufserfahrung und Deutsch helfen stark.",
+    )
+
+
+def _contains_any(text: str, needles: tuple[str, ...]) -> bool:
+    return any(_normalize(needle) in text for needle in needles)
 
 
 async def _sample_payload() -> dict[str, object]:
@@ -400,16 +636,18 @@ async def _sample_payload() -> dict[str, object]:
         "mechanical engineer",
         "school teacher",
         "medical doctor",
-        "IT systems administrator",
+        "IT specialist",
     ):
         occupations = await provider.find_german_occupation(query, "en")
         profession = occupations[0].label_de if occupations else query
         authority = await provider.get_recognition_authority(profession)
         documents = await provider.get_required_documents(profession)
+        labour_market = await provider.get_labour_market_status(profession)
         samples[query] = {
             "occupations": [asdict(occupation) for occupation in occupations[:2]],
             "authority": asdict(authority) if authority is not None else None,
             "documents": [asdict(document) for document in documents[:3]],
+            "labour_market": asdict(labour_market),
         }
     return samples
 

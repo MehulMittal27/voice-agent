@@ -38,14 +38,16 @@ Voice rules:
 - Reply in 1–2 short sentences. Never long paragraphs.
 - Use natural German fillers: "also…", "moment mal…", "genau.", "verstehe."
 - Vary sentence length. Sound like a real person mid-thought.
-- If you need to look up an occupation, an authority, or documents, use your tools.
+- If you need to look up an occupation, an authority, documents, or job demand, use your tools.
 - After a tool call, don't recite the raw result - translate it into what the
   caller needs to know next.
 
-You have three tools:
+You have four tools:
 - find_german_occupation(description, source_lang)
 - get_recognition_authority(profession, city)
 - get_required_documents(profession)
+- get_labour_market_status(profession, region)
+- get_labour_market_status: use when the caller sounds worried about finding work, or asks whether their profession is in demand.
 
 Use them naturally when the conversation needs their output. Don't announce
 that you're using a tool; just weave the result into your reply."""
@@ -56,8 +58,8 @@ OPENAI_TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "find_german_occupation",
             "description": (
-                "Map an English or German occupation description to likely German "
-                "recognition occupation candidates."
+                "Map an English, German, or Ukrainian occupation description to likely "
+                "German recognition occupation candidates."
             ),
             "parameters": {
                 "type": "object",
@@ -66,14 +68,14 @@ OPENAI_TOOLS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": (
                             "The caller's free-text occupation description, such as "
-                            "'registered nurse' or 'IT systems administrator'."
+                            "'registered nurse', 'Pflege', or 'медсестра'."
                         ),
                     },
                     "source_lang": {
                         "type": "string",
                         "description": (
-                            "ISO language code for the caller's description. Use 'en' "
-                            "for this demo unless the caller clearly uses another language."
+                            "ISO language code for the caller's description. Use 'en', "
+                            "'de', or 'uk' when the caller clearly uses that language."
                         ),
                         "default": "en",
                     },
@@ -97,8 +99,8 @@ OPENAI_TOOLS: list[dict[str, Any]] = [
                     "profession": {
                         "type": "string",
                         "description": (
-                            "The German or English profession name, such as 'Krankenschwester' "
-                            "or 'engineer'."
+                            "The German, English, or Ukrainian profession name, such as "
+                            "'Pflegefachfrau', 'nurse', or 'медсестра'."
                         ),
                     },
                     "city": {
@@ -126,9 +128,38 @@ OPENAI_TOOLS: list[dict[str, Any]] = [
                     "profession": {
                         "type": "string",
                         "description": (
-                            "The German or English profession name, such as 'Arzt' "
-                            "or 'teacher'."
+                            "The German, English, or Ukrainian profession name, such as "
+                            "'Arzt', 'teacher', or 'лікар'."
                         ),
+                    },
+                },
+                "required": ["profession"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_labour_market_status",
+            "description": (
+                "Check whether a profession is in demand in Bayern or Germany, "
+                "with rough labour-market numbers for callers worried about finding work."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "profession": {
+                        "type": "string",
+                        "description": (
+                            "The German, English, or Ukrainian profession name, such as "
+                            "'Pflegefachfrau', 'nurse', or 'медсестра'."
+                        ),
+                    },
+                    "region": {
+                        "type": "string",
+                        "description": "German region for the labour-market signal. Defaults to Bayern.",
+                        "default": "Bayern",
                     },
                 },
                 "required": ["profession"],
@@ -237,6 +268,9 @@ BEHAVIOUR ADJUSTMENT - apply on THIS turn:
 - emotion=SAD (stable): Warm empathy, don't rush.
 - audio_events contains "Breath" or "Cough": Their breath is uneven - keep
   your reply shorter than usual to give them space.
+- If the caller expresses employability worry words like Arbeit, Job, Stelle,
+  work, job, робота, proactively call get_labour_market_status and reassure
+  with real numbers.
 
 Do NOT mention this state to the caller. Do NOT say "I can hear you're
 nervous". Just adapt naturally, like a real clerk would."""
@@ -384,6 +418,13 @@ async def _execute_tool_call(tool_call: Any, provider: DataProvider) -> dict[str
                 profession=_required_string(arguments, "profession"),
             )
             return {"documents": _jsonable(result)}
+
+        if function_name == "get_labour_market_status":
+            result = await provider.get_labour_market_status(
+                profession=_required_string(arguments, "profession"),
+                region=_optional_string(arguments, "region", "Bayern"),
+            )
+            return {"labour_market_status": _jsonable(result)}
 
         raise ValueError(f"Unknown tool: {function_name}")
     except Exception as exc:
