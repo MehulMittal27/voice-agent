@@ -23,7 +23,7 @@ class Authority:
 
     name: str
     city: str
-    email: str
+    email: str | None
     phone: str
     website: str
 
@@ -37,8 +37,21 @@ class Document:
     notes: str
 
 
+@dataclass(frozen=True)
+class LabourMarketStatus:
+    """A rough labour-market signal for one profession and region."""
+
+    profession: str
+    region: str
+    shortage: bool
+    shortage_level: str
+    open_positions: int
+    applicants_per_opening: float
+    note: str
+
+
 class DataProvider(ABC):
-    """Abstract interface for occupation, authority, and document lookups."""
+    """Abstract interface for occupation, authority, documents, and labour lookups."""
 
     @abstractmethod
     async def find_german_occupation(
@@ -60,10 +73,19 @@ class DataProvider(ABC):
     async def get_required_documents(self, profession: str) -> list[Document]:
         """Return the usual required documents for a profession."""
 
+    @abstractmethod
+    async def get_labour_market_status(
+        self,
+        profession: str,
+        region: str = "Bayern",
+    ) -> LabourMarketStatus:
+        """Return a rough labour-market status for a profession and region."""
+
 
 __all__ = [
     "Authority",
     "DataProvider",
     "Document",
+    "LabourMarketStatus",
     "Occupation",
 ]

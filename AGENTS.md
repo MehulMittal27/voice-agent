@@ -186,10 +186,12 @@ Voice rules:
 - After a tool call, don't recite the raw result - translate it into what the
   caller needs to know next.
 
-You have three tools:
+You have four tools:
 - find_german_occupation(description, source_lang)
 - get_recognition_authority(profession, city)
 - get_required_documents(profession)
+- get_labour_market_status(profession, region)
+- get_labour_market_status: use when the caller sounds worried about finding work, or asks whether their profession is in demand.
 
 Use them naturally when the conversation needs their output. Don't announce
 that you're using a tool; just weave the result into your reply.
@@ -219,6 +221,9 @@ BEHAVIOUR ADJUSTMENT - apply on THIS turn:
 - emotion=SAD (stable): Warm empathy, don't rush.
 - audio_events contains "Breath" or "Cough": Their breath is uneven - keep
   your reply shorter than usual to give them space.
+- If the caller expresses employability worry words like Arbeit, Job, Stelle,
+  work, job, робота, proactively call get_labour_market_status and reassure
+  with real numbers.
 
 Do NOT mention this state to the caller. Do NOT say "I can hear you're
 nervous". Just adapt naturally, like a real clerk would.
@@ -256,7 +261,7 @@ class Occupation:
 class Authority:
     name: str
     city: str
-    email: str
+    email: str | None
     phone: str
     website: str
 
@@ -266,6 +271,16 @@ class Document:
     name_en: str
     notes: str
 
+@dataclass
+class LabourMarketStatus:
+    profession: str
+    region: str
+    shortage: bool
+    shortage_level: str
+    open_positions: int
+    applicants_per_opening: float
+    note: str
+
 class DataProvider(ABC):
     @abstractmethod
     async def find_german_occupation(self, description: str, source_lang: str) -> list[Occupation]: ...
@@ -273,11 +288,13 @@ class DataProvider(ABC):
     async def get_recognition_authority(self, profession: str, city: str = "Nürnberg") -> Authority | None: ...
     @abstractmethod
     async def get_required_documents(self, profession: str) -> list[Document]: ...
+    @abstractmethod
+    async def get_labour_market_status(self, profession: str, region: str = "Bayern") -> LabourMarketStatus: ...
 ```
 
-`data/mock.py` returns hardcoded plausible responses. Include enough
-variety to cover ~5 professions (nurse, engineer, teacher, doctor, IT admin)
-so the demo tomorrow can lock to any of them without changes.
+`data/mock.py` reads `data/nuremberg_authorities.csv` as the authority source
+of truth, with hardcoded category-aware document and labour-market signals.
+Do not hardcode authority contacts in Python.
 
 Wire these as OpenAI tools using the SDK's tool-calling format. The clerk can
 call zero, one, or multiple tools per turn before generating its verbal reply.

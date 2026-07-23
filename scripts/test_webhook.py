@@ -31,6 +31,19 @@ DEFAULT_USER_MESSAGE = (
     "I trained as a nurse in India and I live in Nuremberg. "
     "What should I do first for recognition in Germany?"
 )
+SCENARIOS = {
+    "default": {
+        "message": DEFAULT_USER_MESSAGE,
+        "required_any": (),
+    },
+    "ukrainian_nurse": {
+        "message": "я медсестра з України, потребую роботи",
+        "required_any": (
+            ("Bayerisches Landesamt für Pflege", "LfP"),
+            ("Mangelberuf", "shortage", "12.000", "12000", "12,000", "12 000"),
+        ),
+    },
+}
 SECRET_PATTERNS = (
     re.compile(r"sk-[A-Za-z0-9_\-]+"),
     re.compile(r"xi-[A-Za-z0-9_\-]+"),
@@ -70,9 +83,10 @@ async def run(args: argparse.Namespace) -> int:
             "PERCEPTION_LANGUAGE; no caller language was sent by this script."
         )
 
+        user_message = _scenario_message(args.scenario, args.message)
         request_payload = _build_webhook_payload(
             perception_session_id=perception_session_id,
-            user_message=args.message,
+            user_message=user_message,
         )
         print(f"webhook_url: {_safe_url(urljoin(base_url, '/v1/chat/completions'))}")
         print("streaming_sse:")
@@ -86,6 +100,7 @@ async def run(args: argparse.Namespace) -> int:
 
     print("\nreassembled_german_text:")
     print(german_text)
+    _assert_scenario_response(args.scenario, german_text)
     return 0
 
 
@@ -337,6 +352,40 @@ async def _run_synthetic_cases() -> int:
     return 0
 
 
+def _scenario_message(scenario: str, override_message: str | None) -> str:
+    if override_message is not None:
+        return override_message
+    scenario_config = SCENARIOS.get(scenario)
+    if scenario_config is None:
+        raise WebhookSmokeTestError(f"Unknown scenario: {scenario}")
+    message = scenario_config["message"]
+    if not isinstance(message, str):
+        raise WebhookSmokeTestError(f"Scenario {scenario} has no message")
+    return message
+
+
+def _assert_scenario_response(scenario: str, text: str) -> None:
+    scenario_config = SCENARIOS.get(scenario)
+    if scenario_config is None:
+        raise WebhookSmokeTestError(f"Unknown scenario: {scenario}")
+
+    required_groups = scenario_config.get("required_any", ())
+    if not required_groups:
+        return
+
+    lowered_text = text.casefold()
+    for group in required_groups:
+        if not isinstance(group, tuple):
+            continue
+        if any(option.casefold() in lowered_text for option in group):
+            continue
+        raise WebhookSmokeTestError(
+            f"Scenario {scenario} response missed all expected markers: "
+            f"{', '.join(group)}"
+        )
+    print(f"scenario_assertions: {scenario} passed")
+
+
 def _normalize_base_url(raw_base_url: str) -> str:
     trimmed = raw_base_url.strip().rstrip("/")
     if not trimmed:
@@ -460,9 +509,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--scenario",
+        choices=sorted(SCENARIOS),
+        default="default",
+        help="Named smoke-test scenario. Use ukrainian_nurse for the labour-market check.",
+    )
+    parser.add_argument(
         "--message",
-        default=DEFAULT_USER_MESSAGE,
-        help="Sample English user message to send to the webhook.",
+        default=None,
+        help="Override the scenario user message sent to the webhook.",
     )
     parser.add_argument(
         "--timeout",
